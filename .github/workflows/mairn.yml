@@ -1,27 +1,72 @@
-name: 🦙 Qwen & DeepSeek Web UI
+name: 🦙 Local LLM Web Interface
+
+# ────────────────────────────────────────────────────────────────────────
+# WHAT THIS DOES
+#   Spins up an Ollama model + a polished chat UI on a GitHub-hosted
+#   runner, and exposes it to you over a temporary Cloudflare Tunnel.
+#
+# HARD LIMITS OF A STANDARD GITHUB RUNNER (read before picking a model)
+#   • ~14 GB free disk, ~16 GB RAM, 4 vCPU, CPU-only (no GPU)
+#   • That rules out anything above ~14B parameters at 4-bit quantization.
+#   Every model below is a real, verified Ollama library tag chosen to
+#   reliably fit on a standard runner. A disk-cleanup step buys extra
+#   headroom for the larger end of the list.
+#
+#   If your org has access to GitHub's larger runners (more RAM/disk),
+#   change `runs-on` below and you can add bigger models to the list.
+# ────────────────────────────────────────────────────────────────────────
 
 on:
   workflow_dispatch:
     inputs:
       model:
-        description: '📦 Model to run (Qwen & DeepSeek only)'
+        description: '📦 Model to run (all verified to fit on a standard runner)'
         required: false
-        default: 'qwen2.5:3b'
+        default: 'llama3.2:3b'
         type: choice
         options:
-          # --- Qwen 2.5 Family ---
+          # ── Ultra-light, <1GB — fastest, good for quick tests ──
           - 'qwen2.5:0.5b'
+          - 'qwen3:0.6b'
+          - 'smollm2:360m'
+          - 'tinyllama:1.1b'
+          # ── Small, 1-2GB — solid everyday chat on CPU ──
+          - 'llama3.2:1b'
+          - 'gemma3:1b'
           - 'qwen2.5:1.5b'
+          - 'qwen3:1.7b'
+          - 'smollm2:1.7b'
+          - 'stablelm2:1.6b'
+          # ── Balanced, 2-4GB — noticeably smarter, still fast ──
+          - 'llama3.2:3b'
+          - 'gemma2:2b'
+          - 'gemma3:4b'
           - 'qwen2.5:3b'
-          - 'qwen2.5-coder:3b'
+          - 'qwen3:4b'
+          - 'phi3:mini'
+          - 'phi4-mini'
+          - 'falcon3:3b'
+          - 'granite3-dense:2b'
+          # ── Capable, 4-6GB — best quality/speed tradeoff on CPU ──
+          - 'mistral:7b'
+          - 'llama3.1:8b'
+          - 'llama3:8b'
           - 'qwen2.5:7b'
-          - 'qwen2.5-coder:7b'
-          - 'qwen2.5:14b'
-          # --- DeepSeek R1 Family ---
-          - 'deepseek-r1:1.5b'
+          - 'qwen3:8b'
           - 'deepseek-r1:7b'
           - 'deepseek-r1:8b'
+          - 'codellama:7b'
+          - 'starcoder2:7b'
+          - 'gemma2:9b'
+          - 'aya:8b'
+          - 'olmo2:7b'
+          - 'granite3-dense:8b'
+          # ── Largest that reliably fits, 8-10GB — expect slower replies ──
+          - 'gemma3:12b'
+          - 'olmo2:13b'
+          - 'qwen2.5:14b'
           - 'deepseek-r1:14b'
+          - 'phi4:14b'
       port:
         description: '🔌 Web UI port'
         required: false
@@ -48,21 +93,35 @@ jobs:
       MODEL_NAME: ${{ inputs.model }}
       CONTEXT_SIZE: ${{ inputs.context_size }}
       PORT: ${{ inputs.port }}
-    
+
     steps:
       - name: 🦙 Show banner
         run: |
           echo "╔═══════════════════════════════════════════════════════════════════╗"
-          echo "║            🧠  Q W E N   &   D E E P S E E K   U I                ║"
+          echo "║            🦙  L O C A L   L L M   W E B   U I                    ║"
           echo "╚═══════════════════════════════════════════════════════════════════╝"
           echo "  📦 Model:   ${MODEL_NAME}"
           echo "  📝 Context: ${CONTEXT_SIZE} tokens"
+          echo "  🔌 Port:    ${PORT}"
+          echo "  🏃 Runner:  $(uname -a)"
+          echo "  💾 Memory:  $(free -h | awk '/Mem:/{print $2}')"
+          echo "  🧠 CPUs:    $(nproc)"
+          echo "  💽 Disk before cleanup:"
+          df -h / | tail -1
 
       - name: 🧹 Free up disk space
+        # Standard runners ship with ~30-40GB of preinstalled toolchains we
+        # don't need (Android SDK, .NET, GHC, extra docker images, etc).
+        # Removing them buys real headroom for the model download.
         run: |
+          echo "──────────────────────────────────────────"
+          echo " 🧹  Reclaiming disk space"
+          echo "──────────────────────────────────────────"
           sudo rm -rf /usr/local/lib/android /opt/ghc /usr/share/dotnet \
             /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" 2>/dev/null || true
           sudo docker image prune -af 2>/dev/null || true
+          echo "  💽 Disk after cleanup:"
+          df -h / | tail -1
 
       - name: 🐍 Setup Python
         uses: actions/setup-python@v5
@@ -71,41 +130,82 @@ jobs:
 
       - name: 📦 Install dependencies
         run: |
+          echo "──────────────────────────────────────────"
+          echo " 📦  Installing Ollama + Python packages"
+          echo "──────────────────────────────────────────"
           curl -fsSL https://ollama.com/install.sh | sh
-          pip install uv
-          uv pip install --system fastapi uvicorn aiohttp httpx python-multipart jinja2 websockets pydantic
+          pip install --no-cache-dir \
+            fastapi uvicorn aiohttp httpx python-multipart \
+            jinja2 websockets pydantic
+          ollama --version
+          python --version
+          echo "✅ Dependencies installed"
 
       - name: 🚀 Start Ollama server
         run: |
+          echo "──────────────────────────────────────────"
+          echo " 🚀  Starting Ollama"
+          echo "──────────────────────────────────────────"
+
+          # The install script auto-registers/starts an "ollama" systemd
+          # service on Linux. Stop it first so we have a single, known
+          # server process instead of two fighting over the same port.
           sudo systemctl stop ollama 2>/dev/null || true
           sudo systemctl disable ollama 2>/dev/null || true
+
           nohup ollama serve > /tmp/ollama.log 2>&1 &
-          
-          echo "⏳ Waiting for Ollama..."
+          echo $! > /tmp/ollama.pid
+
+          echo "⏳ Waiting for Ollama to become ready..."
+          ready=false
           for i in $(seq 1 30); do
             if curl -sf http://localhost:11434/api/tags > /dev/null 2>&1; then
               echo "✅ Ollama is ready!"
-              exit 0
+              ready=true
+              break
             fi
             sleep 2
           done
-          echo "❌ Failed to start Ollama"
-          cat /tmp/ollama.log
-          exit 1
+
+          if [ "$ready" != "true" ]; then
+            echo "❌ Ollama failed to start. Last logs:"
+            tail -n 50 /tmp/ollama.log || true
+            exit 1
+          fi
 
       - name: 📥 Download model
         run: |
-          echo "⏳ Pulling ${MODEL_NAME}..."
-          ollama pull "$MODEL_NAME" || (df -h / && exit 1)
+          echo "──────────────────────────────────────────"
+          echo " 📥  Downloading model: ${MODEL_NAME}"
+          echo "──────────────────────────────────────────"
+          echo "⏳ This can take a few minutes depending on model size..."
+
+          if ! ollama pull "$MODEL_NAME"; then
+            echo "❌ Model pull failed (often disk space or network). Disk state:"
+            df -h /
+            exit 1
+          fi
+
+          if ! ollama list | grep -q "$(echo "$MODEL_NAME" | cut -d: -f1)"; then
+            echo "❌ Model does not appear in 'ollama list' after pull."
+            ollama list
+            exit 1
+          fi
+
+          echo "✅ Model ready:"
+          ollama list
 
       - name: 🔧 Write the web server
         run: |
           cat > ollama_server.py << 'PYEOF'
           #!/usr/bin/env python3
+          """Ollama-backed chat web server with a polished, full-markdown UI."""
+
           import json
           import os
           import logging
           from typing import Optional, List
+
           import httpx
           import uvicorn
           from fastapi import FastAPI, HTTPException
@@ -117,53 +217,50 @@ jobs:
 
           OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
           CONTEXT_SIZE = int(os.getenv("CONTEXT_SIZE", "4096"))
-          MODEL_NAME = os.getenv("MODEL_NAME", "qwen2.5:3b")
+          MODEL_NAME = os.getenv("MODEL_NAME", "llama3.2:3b")
           PORT = int(os.getenv("PORT", "7860"))
 
-          # 🔥 Anti-Hallucination & Language Strict Prompt 🔥
-          SYSTEM_PROMPT = """You are a highly intelligent, precise, and logical AI assistant. 
-          CRITICAL RULES YOU MUST FOLLOW:
-          1. ALWAYS communicate in the EXACT SAME LANGUAGE the user uses (If the user speaks Persian, you MUST reply in natural, flawless Persian).
-          2. NEVER output unexpected Cyrillic (e.g., ИИ), Russian, or Chinese characters.
-          3. NEVER hallucinate. If you do not know the answer, state it clearly.
-          4. Format your code blocks perfectly and use markdown effectively.
-          5. Keep your tone professional, helpful, and direct."""
-
           app = FastAPI(title="Local LLM UI")
+
 
           class ChatMessage(BaseModel):
               role: str
               content: str
 
+
           class ChatRequest(BaseModel):
               messages: List[ChatMessage]
-              temperature: Optional[float] = 0.6
+              temperature: Optional[float] = 0.7
               max_tokens: Optional[int] = 2048
 
-          http_limits = httpx.Limits(max_keepalive_connections=5, max_connections=10)
 
           @app.get("/api/health")
           async def health():
               try:
-                  async with httpx.AsyncClient(timeout=5, limits=http_limits) as client:
+                  async with httpx.AsyncClient(timeout=5) as client:
                       r = await client.get(f"{OLLAMA_HOST}/api/tags")
                       r.raise_for_status()
                   return {"status": "ok", "model": MODEL_NAME}
               except Exception as exc:
                   raise HTTPException(status_code=503, detail=str(exc))
 
+
           @app.get("/", response_class=HTMLResponse)
           async def root():
-              return HTML_TEMPLATE.replace("__MODEL_NAME__", MODEL_NAME).replace("__CONTEXT__", str(CONTEXT_SIZE))
+              return (
+                  HTML_TEMPLATE
+                  .replace("__MODEL_NAME__", MODEL_NAME)
+                  .replace("__CONTEXT_SIZE__", str(CONTEXT_SIZE))
+              )
+
 
           @app.post("/api/chat")
           async def chat(request: ChatRequest):
-              ollama_messages = [{"role": "system", "content": SYSTEM_PROMPT}]
-              ollama_messages.extend([{"role": m.role, "content": m.content} for m in request.messages])
+              ollama_messages = [{"role": m.role, "content": m.content} for m in request.messages]
 
               async def generate():
                   try:
-                      async with httpx.AsyncClient(timeout=300, limits=http_limits) as client:
+                      async with httpx.AsyncClient(timeout=180) as client:
                           async with client.stream(
                               "POST",
                               f"{OLLAMA_HOST}/api/chat",
@@ -179,189 +276,219 @@ jobs:
                               },
                           ) as response:
                               if response.status_code != 200:
-                                  yield f"data: {json.dumps({'error': 'Backend connection error'})}\n\n"
+                                  body = await response.aread()
+                                  yield f"data: {json.dumps({'error': body.decode(errors='ignore')})}\n\n"
                                   yield "data: [DONE]\n\n"
                                   return
 
                               async for line in response.aiter_lines():
                                   line = line.strip()
-                                  if not line: continue
+                                  if not line:
+                                      continue
                                   try:
                                       obj = json.loads(line)
-                                      if err := obj.get("error"):
-                                          yield f"data: {json.dumps({'error': err})}\n\n"
-                                          continue
-                                      content = obj.get("message", {}).get("content")
-                                      if content is not None:
-                                          yield f"data: {json.dumps({'content': content})}\n\n"
-                                  except json.JSONDecodeError: continue
+                                  except json.JSONDecodeError:
+                                      continue
+                                  if err := obj.get("error"):
+                                      yield f"data: {json.dumps({'error': err})}\n\n"
+                                      continue
+                                  content = obj.get("message", {}).get("content")
+                                  if content:
+                                      yield f"data: {json.dumps({'content': content})}\n\n"
                   except Exception as exc:
+                      logger.exception("chat stream failed")
                       yield f"data: {json.dumps({'error': str(exc)})}\n\n"
                   yield "data: [DONE]\n\n"
 
               return StreamingResponse(generate(), media_type="text/event-stream")
 
+
           HTML_TEMPLATE = r'''
           <!DOCTYPE html>
-          <html lang="en" class="dark">
+          <html lang="en">
           <head>
           <meta charset="UTF-8">
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <title>LLM Interface · __MODEL_NAME__</title>
-          <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Plus+Jakarta+Sans:wght@500;600;700&family=Vazirmatn:wght@400;500;600;700&display=swap" rel="stylesheet">
+          <title>Local LLM · __MODEL_NAME__</title>
+
+          <!-- Markdown (GFM: tables, task lists, strikethrough, autolinks) -->
           <script src="https://cdn.jsdelivr.net/npm/marked@4.3.0/marked.min.js"></script>
+          <!-- Sanitize model-generated HTML before it ever hits innerHTML -->
           <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.6/purify.min.js"></script>
-          <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+          <!-- Code syntax highlighting -->
+          <link id="hljsTheme" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
           <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-          
+          <!-- Math: $inline$, $$block$$, \( \), \[ \] -->
+          <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
+          <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
+          <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/contrib/auto-render.min.js"></script>
+
           <style>
             :root {
-              --bg: #09090b; 
-              --sidebar: rgba(24, 24, 27, 0.65); 
-              --border: rgba(255, 255, 255, 0.08);
-              --text: #f8fafc; 
-              --text-secondary: #94a3b8; 
-              --accent-gradient: linear-gradient(135deg, #10b981, #06b6d4);
-              --user-bg: rgba(16, 185, 129, 0.06); 
-              --assistant-bg: transparent; 
-              --input-bg: rgba(24, 24, 27, 0.7);
-              --code-bg: #1e1e22; 
-              --danger: #ef4444; 
-              --ok: #10b981;
+              --bg: #fdfbf7; --sidebar: #f4efe6; --border: #e6dfd5;
+              --text: #383735; --text-secondary: #73716b; --accent: #cc785c;
+              --user-bg: #f4efe6; --assistant-bg: #ffffff; --input-bg: #ffffff;
+              --danger: #c0392b; --ok: #3c9a5f; --code-bg: #1e1e1e;
+              --shadow: 0 4px 20px rgba(0,0,0,.05);
             }
-            
+            html.dark {
+              --bg: #262624; --sidebar: #1f1e1c; --border: #3a3936;
+              --text: #ece8e1; --text-secondary: #a8a29a; --accent: #e0906b;
+              --user-bg: #1f1e1c; --assistant-bg: #2b2a28; --input-bg: #2b2a28;
+              --code-bg: #17171590; --shadow: 0 4px 20px rgba(0,0,0,.35);
+            }
             * { margin: 0; padding: 0; box-sizing: border-box; }
             body {
               background: var(--bg); color: var(--text); height: 100vh; display: flex; overflow: hidden;
-              font-family: 'Vazirmatn', 'Inter', sans-serif; direction: auto;
+              font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+              transition: background .2s ease, color .2s ease;
             }
-            h1, h2, h3, h4, .title { font-family: 'Plus Jakarta Sans', 'Vazirmatn', sans-serif; }
-            code, pre { font-family: 'JetBrains Mono', monospace; direction: ltr; text-align: left; }
-            
-            /* 🔥 DeepSeek Thinking Box (Glassmorphic) 🔥 */
-            think {
-              display: block; margin: 16px 0; padding: 14px 18px;
-              background: rgba(6, 182, 212, 0.03);
-              border: 1px solid rgba(6, 182, 212, 0.15); border-left: 4px solid #06b6d4;
-              border-radius: 8px; color: #94a3b8; font-size: 0.9em; line-height: 1.6;
-              white-space: pre-wrap; font-style: italic; direction: auto;
-            }
-            think::before { 
-              content: '🧠 Thinking Process...'; display: flex; align-items: center; 
-              font-weight: 600; margin-bottom: 8px; color: #06b6d4; font-style: normal; font-family: 'Plus Jakarta Sans', sans-serif;
-            }
-
             .sidebar {
-              width: 280px; background: var(--sidebar); border-right: 1px solid var(--border);
-              backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
-              display: flex; flex-direction: column; padding: 20px; flex-shrink: 0;
+              width: 260px; background: var(--sidebar); border-right: 1px solid var(--border);
+              display: flex; flex-direction: column; padding: 16px; flex-shrink: 0; transition: transform .2s ease, background .2s ease;
             }
             .new-chat-btn {
-              display: flex; align-items: center; justify-content: center; width: 100%; padding: 12px;
-              background: var(--input-bg); border: 1px solid var(--border); border-radius: 12px; color: var(--text);
-              font-family: inherit; font-size: 14px; font-weight: 600; cursor: pointer; margin-bottom: 24px;
-              transition: all 0.2s ease;
+              display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 14px;
+              background: var(--input-bg); border: 1px solid var(--border); border-radius: 8px; color: var(--text);
+              font-size: 14px; font-weight: 500; cursor: pointer; margin-bottom: 12px;
+              box-shadow: 0 1px 2px rgba(0,0,0,.03); transition: background .2s, border-color .2s;
             }
-            .new-chat-btn:hover { border-color: #10b981; background: rgba(16, 185, 129, 0.1); }
-            
-            .settings-group { display: flex; flex-direction: column; gap: 14px; font-size: 13px; color: var(--text-secondary); margin-bottom: 16px; }
-            .settings-group label { display: flex; justify-content: space-between; align-items: center; font-weight: 500; }
-            .settings-group input[type="range"] { width: 100%; accent-color: #10b981; margin-top: 6px; }
-            
+            .new-chat-btn:hover { border-color: var(--accent); }
+            .theme-toggle {
+              display: flex; align-items: center; justify-content: space-between; width: 100%;
+              padding: 8px 14px; border: 1px solid var(--border); border-radius: 8px; background: var(--input-bg);
+              color: var(--text); font-size: 13px; cursor: pointer; margin-bottom: 20px;
+            }
             .sidebar-footer {
-              margin-top: auto; border-top: 1px solid var(--border); padding-top: 16px;
-              font-size: 12px; color: var(--text-secondary); display: flex; flex-direction: column; gap: 10px;
+              margin-top: auto; border-top: 1px solid var(--border); padding-top: 14px;
+              font-size: 13px; color: var(--text-secondary); display: flex; flex-direction: column; gap: 8px;
             }
             .model-tag {
-              background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.2);
-              color: #10b981; padding: 6px 10px; border-radius: 8px; font-family: 'JetBrains Mono', monospace; text-align: center; font-size: 11px;
+              background: rgba(204,120,92,.14); color: var(--accent); padding: 4px 8px;
+              border-radius: 6px; font-size: 12px; font-weight: 600; width: fit-content;
             }
-            .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; }
-            .status-dot.ok { background: var(--ok); box-shadow: 0 0 8px rgba(16,185,129,0.5); }
+            .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+            .status-dot.ok { background: var(--ok); }
             .status-dot.bad { background: var(--danger); }
-            
-            .main-content { flex: 1; display: flex; flex-direction: column; position: relative; background: radial-gradient(circle at 50% 0%, rgba(16,185,129,0.03) 0%, transparent 70%); }
-            .chat-container { flex: 1; overflow-y: auto; display: flex; flex-direction: column; padding: 0 0 160px 0; scroll-behavior: smooth; }
-            
-            .message-row { width: 100%; display: flex; justify-content: center; padding: 32px 24px; animation: fadeIn .3s ease; border-bottom: 1px solid rgba(255,255,255,0.02); }
-            @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-            
+            .main-content { flex: 1; display: flex; flex-direction: column; height: 100vh; position: relative; background: var(--bg); }
+            .menu-btn { display: none; }
+            .chat-container { flex: 1; overflow-y: auto; display: flex; flex-direction: column; padding: 20px 0 150px 0; scroll-behavior: smooth; }
+            .message-row {
+              width: 100%; display: flex; justify-content: center; padding: 24px 16px;
+              border-bottom: 1px solid rgba(230,223,213,.25); animation: fadeIn .25s ease;
+            }
+            @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
             .message-row.user { background: var(--user-bg); }
-            .message-inner { max-width: 840px; width: 100%; display: flex; gap: 20px; line-height: 1.8; font-size: 15px; }
-            
+            .message-row.assistant { background: var(--assistant-bg); }
+            .message-row.error .message-body { color: var(--danger); }
+            .message-inner { max-width: 800px; width: 100%; display: flex; gap: 16px; line-height: 1.7; font-size: 15px; }
             .avatar {
-              width: 36px; height: 36px; border-radius: 10px; display: flex; align-items: center; justify-content: center;
-              font-size: 14px; font-weight: 600; flex-shrink: 0; color: #fff; font-family: 'Inter', sans-serif;
+              width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+              font-size: 13px; font-weight: 600; flex-shrink: 0; color: #fff;
             }
-            .avatar.user { background: #1e293b; border: 1px solid var(--border); }
-            .avatar.assistant { background: var(--accent-gradient); box-shadow: 0 4px 12px rgba(16,185,129,0.2); }
-            
-            .message-body { flex: 1; min-width: 0; }
-            .message-body p { margin-bottom: 16px; }
+            .avatar.user { background: linear-gradient(135deg, #4a4846, #22211f); }
+            .avatar.assistant { background: linear-gradient(135deg, var(--accent), #a85f45); }
+            .message-body { flex: 1; overflow-x: auto; min-width: 0; }
+            .message-body > *:first-child { margin-top: 0; }
+            .message-body p { margin: 0 0 12px; }
             .message-body p:last-child { margin-bottom: 0; }
-            .message-body h1, .message-body h2, .message-body h3 { margin: 24px 0 12px; color: #fff; }
-            
+            .message-body h1, .message-body h2, .message-body h3 { margin: 18px 0 8px; line-height: 1.35; }
+            .message-body hr { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
             .message-body pre {
-              background: var(--code-bg); padding: 36px 16px 16px; border-radius: 12px;
-              overflow-x: auto; margin: 16px 0; border: 1px solid var(--border); position: relative;
+              background: var(--code-bg); color: #d4d4d4; padding: 30px 14px 14px; border-radius: 8px;
+              overflow-x: auto; margin: 12px 0; border: 1px solid rgba(255,255,255,.08); position: relative;
             }
-            .message-body code { background: rgba(255,255,255,0.08); padding: 3px 6px; border-radius: 6px; font-size: 13.5px; }
-            .message-body pre code { background: transparent; padding: 0; }
-            
+            .message-body code {
+              font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 13px;
+              background: rgba(127,127,127,.15); padding: 2px 5px; border-radius: 4px;
+            }
+            .message-body pre code { background: transparent; padding: 0; color: inherit; }
+            .code-lang {
+              position: absolute; top: 8px; left: 12px; font-size: 11px; color: #999;
+              text-transform: uppercase; letter-spacing: .04em; font-family: ui-sans-serif, system-ui, sans-serif;
+            }
             .copy-btn {
-              position: absolute; top: 8px; right: 8px; background: rgba(255,255,255,0.05); border: 1px solid var(--border);
-              color: #cbd5e1; font-size: 11px; padding: 6px 12px; border-radius: 6px; cursor: pointer; transition: 0.2s;
-              font-family: 'Inter', sans-serif;
+              position: absolute; top: 6px; right: 8px; background: rgba(255,255,255,.08); border: none;
+              color: #ccc; font-size: 11px; padding: 4px 8px; border-radius: 4px; cursor: pointer;
             }
-            .copy-btn:hover { background: rgba(255,255,255,0.1); color: #fff; }
-            
+            .copy-btn:hover { background: rgba(255,255,255,.18); }
+            .message-body ul, .message-body ol { padding-left: 22px; margin: 0 0 12px; }
+            .message-body li { margin: 3px 0; }
+            .message-body ul.contains-task-list { list-style: none; padding-left: 4px; }
+            .message-body li.task-list-item { display: flex; align-items: flex-start; gap: 8px; }
+            .message-body li.task-list-item input[type="checkbox"] { margin-top: 5px; accent-color: var(--accent); }
+            .message-body blockquote {
+              border-left: 3px solid var(--accent); padding: 2px 12px; color: var(--text-secondary); margin: 12px 0;
+            }
+            .message-body table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 14px; }
+            .message-body th, .message-body td { border: 1px solid var(--border); padding: 8px 12px; text-align: left; }
+            .message-body th { background: var(--sidebar); }
+            .message-body img { max-width: 100%; border-radius: 8px; }
+            .message-body a { color: var(--accent); }
+            .message-body del { opacity: .6; }
+            .katex-display { overflow-x: auto; overflow-y: hidden; padding: 4px 0; }
             .input-area-wrapper {
               position: absolute; bottom: 0; left: 0; width: 100%;
-              background: linear-gradient(180deg, transparent 0%, var(--bg) 30%);
-              padding: 24px 24px 32px; display: flex; justify-content: center; pointer-events: none;
+              background: linear-gradient(180deg, transparent 0%, var(--bg) 45%);
+              padding: 20px 24px 28px 24px; display: flex; justify-content: center;
             }
             .input-box {
-              max-width: 840px; width: 100%; background: var(--input-bg); border: 1px solid var(--border);
-              backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); pointer-events: auto;
-              border-radius: 24px; display: flex; align-items: flex-end; padding: 14px 16px 14px 24px; gap: 12px;
-              box-shadow: 0 10px 40px -10px rgba(0,0,0,0.5); transition: border-color 0.2s; direction: rtl; /* helps with mixed input */
+              max-width: 800px; width: 100%; background: var(--input-bg); border: 1px solid var(--border);
+              border-radius: 16px; box-shadow: var(--shadow); display: flex; align-items: flex-end;
+              padding: 12px 16px; gap: 12px;
             }
-            .input-box:focus-within { border-color: rgba(16,185,129,0.4); }
             .input-box textarea {
               flex: 1; background: transparent; border: none; color: var(--text); font-family: inherit;
-              font-size: 15px; resize: none; outline: none; max-height: 200px; min-height: 24px; line-height: 24px; direction: auto;
+              font-size: 15px; resize: none; outline: none; max-height: 200px; min-height: 24px; line-height: 24px;
             }
+            .input-box textarea::placeholder { color: var(--text-secondary); }
             .send-btn, .stop-btn {
-              border: none; border-radius: 14px; width: 40px; height: 40px; display: flex; align-items: center;
-              justify-content: center; color: #fff; cursor: pointer; flex-shrink: 0; transition: all 0.2s;
+              border: none; border-radius: 10px; width: 36px; height: 36px; display: flex; align-items: center;
+              justify-content: center; color: #fff; cursor: pointer; transition: opacity .2s, transform .1s; flex-shrink: 0;
             }
-            .send-btn { background: var(--accent-gradient); box-shadow: 0 2px 10px rgba(16,185,129,0.2); font-weight: bold; }
-            .stop-btn { background: var(--danger); display: none; font-size: 18px; }
-            .send-btn:hover { transform: translateY(-1px); box-shadow: 0 4px 15px rgba(16,185,129,0.3); }
-            .send-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; box-shadow: none; }
-            
+            .send-btn { background: var(--accent); }
+            .stop-btn { background: var(--danger); display: none; }
+            .send-btn:hover, .stop-btn:hover { opacity: .9; }
+            .send-btn:active, .stop-btn:active { transform: scale(.95); }
+            .send-btn:disabled { opacity: .3; cursor: not-allowed; }
             .loading-dots::after { content: '...'; animation: dots 1.5s steps(4, end) infinite; }
             @keyframes dots { 0% { content: ''; } 25% { content: '.'; } 50% { content: '..'; } 75% { content: '...'; } }
+            .settings-group { display: flex; flex-direction: column; gap: 10px; font-size: 13px; color: var(--text-secondary); margin-bottom: 16px; }
+            .settings-group label { display: flex; justify-content: space-between; align-items: center; }
+            .settings-group input[type="range"] { width: 130px; accent-color: var(--accent); }
+
+            @media (max-width: 720px) {
+              .sidebar { position: fixed; z-index: 20; height: 100vh; transform: translateX(-100%); }
+              .sidebar.open { transform: translateX(0); }
+              .menu-btn {
+                display: flex; position: absolute; top: 14px; left: 14px; z-index: 10; width: 34px; height: 34px;
+                align-items: center; justify-content: center; background: var(--input-bg); color: var(--text);
+                border: 1px solid var(--border); border-radius: 8px; cursor: pointer;
+              }
+              .message-inner { max-width: 100%; }
+            }
           </style>
           </head>
           <body>
+            <button class="menu-btn" onclick="document.querySelector('.sidebar').classList.toggle('open')">☰</button>
             <div class="sidebar">
-              <button class="new-chat-btn" onclick="clearChat()">＋ Start New Session</button>
-              
+              <button class="new-chat-btn" onclick="clearChat()"><span>＋</span> Start New Chat</button>
+              <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()">
+                <span id="themeLabel">🌙 Dark mode</span>
+              </button>
               <div class="settings-group">
-                <div>
-                  <label>Temperature: <span id="tempVal">0.6</span></label>
-                  <input type="range" id="temperature" min="0" max="1" step="0.1" value="0.6">
-                </div>
+                <label>Temperature: <span id="tempVal">0.7</span></label>
+                <input type="range" id="temperature" min="0" max="2" step="0.1" value="0.7">
+                <label>Max tokens: <span id="tokenVal">2048</span></label>
+                <input type="range" id="maxTokens" min="128" max="4096" step="128" value="2048">
               </div>
-              
               <div class="sidebar-footer">
-                <div class="model-tag">📦 __MODEL_NAME__</div>
-                <div class="model-tag">⚙️ Ctx: __CONTEXT__</div>
-                <span id="statusIndicator"><span class="status-dot ok"></span>Connecting...</span>
+                <span class="model-tag">📦 __MODEL_NAME__</span>
+                <span id="statusIndicator"><span class="status-dot ok"></span>Checking...</span>
+                <span id="tokenCounter">Tokens (approx): 0</span>
               </div>
             </div>
-            
+
             <div class="main-content">
               <div class="chat-container" id="chatContainer">
                 <div class="message-row assistant">
@@ -371,9 +498,10 @@ jobs:
                   </div>
                 </div>
               </div>
+
               <div class="input-area-wrapper">
                 <div class="input-box">
-                  <textarea id="userInput" placeholder="Ask anything... (پشتیبانی کامل از فارسی)" rows="1"></textarea>
+                  <textarea id="userInput" placeholder="Message the model... (Markdown & LaTeX supported)" rows="1"></textarea>
                   <button class="send-btn" id="sendButton" onclick="sendMessage()">↑</button>
                   <button class="stop-btn" id="stopButton" onclick="stopGenerating()">■</button>
                 </div>
@@ -381,190 +509,350 @@ jobs:
             </div>
 
           <script>
+            const STORE_KEY = 'llama-ui-state-v1';
+
+            // ---------- Theme ----------
+            function applyTheme(theme) {
+              document.documentElement.classList.toggle('dark', theme === 'dark');
+              document.getElementById('hljsTheme').href = theme === 'dark'
+                ? 'https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css'
+                : 'https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-light.min.css';
+              document.getElementById('themeLabel').textContent = theme === 'dark' ? '☀️ Light mode' : '🌙 Dark mode';
+            }
+            function toggleTheme() {
+              const next = document.documentElement.classList.contains('dark') ? 'light' : 'dark';
+              applyTheme(next);
+              saveState();
+            }
+            const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+
+            // ---------- Markdown + math rendering ----------
             marked.setOptions({
-              gfm: true, breaks: true,
+              gfm: true,
+              breaks: true,
               highlight: function (code, lang) {
                 if (lang && hljs.getLanguage(lang)) return hljs.highlight(code, { language: lang }).value;
                 return hljs.highlightAuto(code).value;
               }
             });
 
-            function renderInto(el, text, opts = {}) {
-              // Ensure <think> tags are well-formed for DeepSeek
-              let processedText = text;
-              const openCount = (processedText.match(/<think>/g) || []).length;
-              const closeCount = (processedText.match(/<\/think>/g) || []).length;
-              if (openCount > closeCount) { processedText += '</think>'; }
-
-              el.innerHTML = DOMPurify.sanitize(marked.parse(processedText), { ADD_TAGS: ['think'] }) + (opts.loading ? '<span class="loading-dots"></span>' : '');
-              
-              if (!opts.loading) {
-                el.querySelectorAll('pre').forEach(pre => {
-                  if (pre.querySelector('.copy-btn')) return;
-                  const btn = document.createElement('button'); btn.className = 'copy-btn'; btn.textContent = 'Copy';
-                  btn.onclick = () => { 
-                    navigator.clipboard.writeText(pre.innerText.replace(/^Copy\s*/, '')).then(() => { 
-                      btn.textContent = 'Copied!'; setTimeout(() => btn.textContent = 'Copy', 1500); 
-                    }); 
-                  };
-                  pre.appendChild(btn);
-                });
-              }
+            function decorateCodeBlocks(body) {
+              body.querySelectorAll('pre').forEach(pre => {
+                if (pre.querySelector('.copy-btn')) return;
+                const codeEl = pre.querySelector('code');
+                const langMatch = codeEl && codeEl.className.match(/language-(\w+)/);
+                if (langMatch) {
+                  const label = document.createElement('span');
+                  label.className = 'code-lang';
+                  label.textContent = langMatch[1];
+                  pre.appendChild(label);
+                }
+                const btn = document.createElement('button');
+                btn.className = 'copy-btn';
+                btn.textContent = 'Copy';
+                btn.onclick = () => {
+                  navigator.clipboard.writeText(pre.innerText.replace(/^Copy\s*/, '')).then(() => {
+                    btn.textContent = 'Copied!';
+                    setTimeout(() => (btn.textContent = 'Copy'), 1200);
+                  });
+                };
+                pre.appendChild(btn);
+              });
             }
 
-            const elements = {
-              chat: document.getElementById('chatContainer'),
-              input: document.getElementById('userInput'),
-              send: document.getElementById('sendButton'),
-              stop: document.getElementById('stopButton'),
-              temp: document.getElementById('temperature'),
-              tempVal: document.getElementById('tempVal')
-            };
+            function renderInto(el, text, opts = {}) {
+              const rawHtml = marked.parse(text);
+              el.innerHTML = DOMPurify.sanitize(rawHtml) + (opts.loading ? '<span class="loading-dots"></span>' : '');
+              if (window.renderMathInElement) {
+                renderMathInElement(el, {
+                  delimiters: [
+                    { left: '$$', right: '$$', display: true },
+                    { left: '\\[', right: '\\]', display: true },
+                    { left: '\\(', right: '\\)', display: false },
+                    { left: '$', right: '$', display: false }
+                  ],
+                  throwOnError: false
+                });
+              }
+              if (!opts.loading) decorateCodeBlocks(el);
+            }
 
-            let state = { history: [], streaming: false, controller: null };
+            applyTheme(prefersDark ? 'dark' : 'light');
 
-            renderInto(document.getElementById('welcomeMsg'), "System ready. Local inference engine **__MODEL_NAME__** is online. \n\n*Strict logic and native language generation rules are actively enforced.*");
+            const chatContainer = document.getElementById('chatContainer');
+            const userInput = document.getElementById('userInput');
+            const sendButton = document.getElementById('sendButton');
+            const stopButton = document.getElementById('stopButton');
+            const tokenCounter = document.getElementById('tokenCounter');
+            const statusIndicator = document.getElementById('statusIndicator');
+            const temperatureEl = document.getElementById('temperature');
+            const maxTokensEl = document.getElementById('maxTokens');
+            let isStreaming = false;
+            let totalTokens = 0;
+            let messageHistory = [];
+            let controller = null;
 
-            elements.input.addEventListener('input', function() { this.style.height = 'auto'; this.style.height = Math.min(this.scrollHeight, 200) + 'px'; });
-            elements.input.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } });
-            elements.temp.addEventListener('input', function() { elements.tempVal.textContent = this.value; });
+            renderInto(document.getElementById('welcomeMsg'), "Hello! I'm **__MODEL_NAME__** running locally on this runner. Ask me anything — tables, code, task lists, and math (`$e=mc^2$`) all render here.");
+
+            // ---------- Persistence (this page only, not a Claude artifact) ----------
+            function saveState() {
+              try {
+                localStorage.setItem(STORE_KEY, JSON.stringify({
+                  theme: document.documentElement.classList.contains('dark') ? 'dark' : 'light',
+                  temperature: temperatureEl.value,
+                  maxTokens: maxTokensEl.value,
+                  messageHistory,
+                  totalTokens
+                }));
+              } catch { /* storage unavailable, ignore */ }
+            }
+            function restoreState() {
+              try {
+                const raw = localStorage.getItem(STORE_KEY);
+                if (!raw) return;
+                const s = JSON.parse(raw);
+                if (s.theme) applyTheme(s.theme);
+                if (s.temperature) { temperatureEl.value = s.temperature; document.getElementById('tempVal').textContent = s.temperature; }
+                if (s.maxTokens) { maxTokensEl.value = s.maxTokens; document.getElementById('tokenVal').textContent = s.maxTokens; }
+                if (Array.isArray(s.messageHistory)) {
+                  messageHistory = s.messageHistory;
+                  totalTokens = s.totalTokens || 0;
+                  messageHistory.forEach(m => appendMessage(m.role, m.content));
+                  tokenCounter.textContent = `Tokens (approx): ${totalTokens}`;
+                }
+              } catch { /* ignore corrupt storage */ }
+            }
 
             async function checkHealth() {
               try {
                 const r = await fetch('/api/health');
-                document.getElementById('statusIndicator').innerHTML = r.ok ? '<span class="status-dot ok"></span>System Online' : '<span class="status-dot bad"></span>Offline';
-              } catch { document.getElementById('statusIndicator').innerHTML = '<span class="status-dot bad"></span>Offline'; }
+                statusIndicator.innerHTML = r.ok
+                  ? '<span class="status-dot ok"></span>Ollama ready'
+                  : '<span class="status-dot bad"></span>Ollama unreachable';
+              } catch {
+                statusIndicator.innerHTML = '<span class="status-dot bad"></span>Ollama unreachable';
+              }
             }
-            setInterval(checkHealth, 10000); checkHealth();
+            checkHealth();
+            setInterval(checkHealth, 15000);
 
-            function appendMessage(role, content, isLoading = false) {
-              const row = document.createElement('div'); row.className = `message-row ${role}`;
-              const inner = document.createElement('div'); inner.className = 'message-inner';
-              const avatar = document.createElement('div'); avatar.className = `avatar ${role}`; avatar.textContent = role === 'user' ? 'U' : '✦';
-              const body = document.createElement('div'); body.className = 'message-body';
-              inner.append(avatar, body); row.appendChild(inner); elements.chat.appendChild(row);
+            userInput.addEventListener('input', function () {
+              this.style.height = 'auto';
+              this.style.height = Math.min(this.scrollHeight, 200) + 'px';
+            });
+            userInput.addEventListener('keydown', function (e) {
+              if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+            });
+            temperatureEl.addEventListener('input', function () {
+              document.getElementById('tempVal').textContent = this.value; saveState();
+            });
+            maxTokensEl.addEventListener('input', function () {
+              document.getElementById('tokenVal').textContent = this.value; saveState();
+            });
+
+            function appendMessage(role, content, isLoading = false, isError = false) {
+              const row = document.createElement('div');
+              row.className = `message-row ${role}` + (isError ? ' error' : '');
+              const inner = document.createElement('div');
+              inner.className = 'message-inner';
+              const avatar = document.createElement('div');
+              avatar.className = `avatar ${role}`;
+              avatar.textContent = role === 'user' ? 'You' : '✦';
+              const body = document.createElement('div');
+              body.className = 'message-body';
+              inner.appendChild(avatar);
+              inner.appendChild(body);
+              row.appendChild(inner);
+              chatContainer.appendChild(row);
               renderInto(body, content, { loading: isLoading });
-              elements.chat.scrollTop = elements.chat.scrollHeight;
+              chatContainer.scrollTop = chatContainer.scrollHeight;
               return body;
             }
 
-            function clearChat() {
-              const rows = elements.chat.querySelectorAll('.message-row');
-              for (let i = 1; i < rows.length; i++) rows[i].remove();
-              state.history = [];
+            function updateLastAssistantMessage(content, isComplete = false) {
+              const rows = chatContainer.querySelectorAll('.message-row.assistant');
+              if (!rows.length) return;
+              const body = rows[rows.length - 1].querySelector('.message-body');
+              if (!body) return;
+              renderInto(body, content, { loading: !isComplete });
+              chatContainer.scrollTop = chatContainer.scrollHeight;
             }
 
-            function stopGenerating() { if (state.controller) state.controller.abort(); }
+            function clearChat() {
+              const rows = chatContainer.querySelectorAll('.message-row');
+              for (let i = 1; i < rows.length; i++) rows[i].remove();
+              messageHistory = [];
+              totalTokens = 0;
+              tokenCounter.textContent = 'Tokens (approx): 0';
+              saveState();
+            }
+
+            function stopGenerating() {
+              if (controller) controller.abort();
+            }
 
             async function sendMessage() {
-              if (state.streaming || !elements.input.value.trim()) return;
-              const text = elements.input.value.trim();
-              
+              if (isStreaming) return;
+              const text = userInput.value.trim();
+              if (!text) return;
+
               appendMessage('user', text);
-              state.history.push({ role: 'user', content: text });
-              elements.input.value = ''; elements.input.style.height = 'auto';
-              
-              elements.send.style.display = 'none'; elements.stop.style.display = 'flex';
-              state.streaming = true; state.controller = new AbortController();
-              
-              appendMessage('assistant', '', true);
+              messageHistory.push({ role: 'user', content: text });
+              userInput.value = '';
+              userInput.style.height = 'auto';
+
+              sendButton.style.display = 'none';
+              stopButton.style.display = 'flex';
+              isStreaming = true;
+              controller = new AbortController();
+
+              appendMessage('assistant', 'Thinking', true);
+
               let fullContent = '';
-              
               try {
-                const res = await fetch('/api/chat', {
-                  method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: state.controller.signal,
-                  body: JSON.stringify({ messages: state.history, temperature: parseFloat(elements.temp.value) })
+                const temperature = parseFloat(temperatureEl.value);
+                const maxTokens = parseInt(maxTokensEl.value);
+
+                const response = await fetch('/api/chat', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  signal: controller.signal,
+                  body: JSON.stringify({ messages: messageHistory, temperature, max_tokens: maxTokens })
                 });
-                
-                const reader = res.body.getReader(); const decoder = new TextDecoder();
+                if (!response.ok) throw new Error(`Server returned ${response.status}`);
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
                 let buffer = '';
-                
+                let streamError = null;
+
                 while (true) {
-                  const { done, value } = await reader.read(); if (done) break;
+                  const { done, value } = await reader.read();
+                  if (done) break;
                   buffer += decoder.decode(value, { stream: true });
-                  const lines = buffer.split('\n'); buffer = lines.pop() || '';
-                  
+                  const lines = buffer.split('\n');
+                  buffer = lines.pop() || '';
                   for (const line of lines) {
-                    if (!line.startsWith('data: ') || line.includes('[DONE]')) continue;
+                    if (!line.startsWith('data: ')) continue;
+                    const data = line.slice(6);
+                    if (data === '[DONE]') continue;
                     try {
-                      const data = JSON.parse(line.slice(6));
-                      if (data.content !== undefined) {
-                        fullContent += data.content;
-                        const rows = elements.chat.querySelectorAll('.message-row.assistant');
-                        renderInto(rows[rows.length - 1].querySelector('.message-body'), fullContent, { loading: true });
-                        elements.chat.scrollTop = elements.chat.scrollHeight;
+                      const parsed = JSON.parse(data);
+                      if (parsed.error) { streamError = parsed.error; }
+                      else if (parsed.content) {
+                        fullContent += parsed.content;
+                        updateLastAssistantMessage(fullContent, false);
                       }
-                    } catch {}
+                    } catch { /* ignore partial JSON */ }
                   }
                 }
-              } catch (e) {
-                if (e.name !== 'AbortError') fullContent += '\n\n`[Connection Error]`';
+
+                if (streamError) throw new Error(streamError);
+
+                updateLastAssistantMessage(fullContent, true);
+                messageHistory.push({ role: 'assistant', content: fullContent });
+                totalTokens += Math.ceil(fullContent.length / 4);
+                tokenCounter.textContent = `Tokens (approx): ${totalTokens}`;
+                saveState();
+              } catch (error) {
+                if (error.name === 'AbortError') {
+                  updateLastAssistantMessage(fullContent + '\n\n*(stopped)*', true);
+                  if (fullContent) { messageHistory.push({ role: 'assistant', content: fullContent }); saveState(); }
+                } else {
+                  updateLastAssistantMessage(`⚠️ ${error.message || 'Error generating a response.'}`, true);
+                }
               }
-              
-              const rows = elements.chat.querySelectorAll('.message-row.assistant');
-              renderInto(rows[rows.length - 1].querySelector('.message-body'), fullContent, { loading: false });
-              
-              if (fullContent) state.history.push({ role: 'assistant', content: fullContent });
-              
-              elements.send.style.display = 'flex'; elements.stop.style.display = 'none';
-              state.streaming = false; state.controller = null; elements.input.focus();
+
+              sendButton.style.display = 'flex';
+              stopButton.style.display = 'none';
+              isStreaming = false;
+              controller = null;
+              userInput.focus();
             }
+
+            restoreState();
           </script>
           </body>
           </html>
           '''
-          
+
           if __name__ == "__main__":
-              uvicorn.run(app, host="0.0.0.0", port=PORT, log_level="warning")
+              uvicorn.run(app, host="0.0.0.0", port=PORT, log_level="info")
           PYEOF
-          
+          echo "✅ Server script written"
+
       - name: 🌐 Start web server
         run: |
+          echo "──────────────────────────────────────────"
+          echo " 🌐  Starting web UI"
+          echo "──────────────────────────────────────────"
           nohup python ollama_server.py > /tmp/webui.log 2>&1 &
+          echo $! > /tmp/webui.pid
+
+          ready=false
           for i in $(seq 1 15); do
-            if curl -sf "http://localhost:${PORT}/api/health" > /dev/null 2>&1; then
+            if curl -sf "http://localhost:${PORT}" > /dev/null 2>&1; then
               echo "✅ Web UI is ready!"
-              exit 0
+              ready=true
+              break
             fi
             sleep 2
           done
-          cat /tmp/webui.log
-          exit 1
+
+          if [ "$ready" != "true" ]; then
+            echo "❌ Web UI failed to start. Last logs:"
+            tail -n 50 /tmp/webui.log || true
+            exit 1
+          fi
 
       - name: 📦 Install cloudflared
         run: |
           curl -L -s https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o cloudflared
           chmod +x cloudflared
           sudo mv cloudflared /usr/local/bin/
+          cloudflared --version
 
       - name: 🌐 Create tunnel and wait
         run: |
+          echo "──────────────────────────────────────────"
+          echo " 🌐  Creating Cloudflare tunnel"
+          echo "──────────────────────────────────────────"
+
           cloudflared tunnel --url "http://127.0.0.1:${PORT}" --protocol http2 > tunnel.log 2>&1 &
           TUNNEL_PID=$!
-          
-          echo "⏳ Requesting Cloudflare Tunnel URL..."
+
+          echo "⏳ Waiting for tunnel URL..."
+          TUNNEL_URL=""
           for i in $(seq 1 30); do
-            TUNNEL_URL=$(grep -oE 'https://[a-zA-Z0-9-]+\.trycloudflare\.com' tunnel.log | head -1)
+            TUNNEL_URL=$(grep -oE 'https://[a-zA-Z0-9-]+\.trycloudflare\.com' tunnel.log 2>/dev/null | head -1)
             [ -n "$TUNNEL_URL" ] && break
             sleep 2
           done
-          
+
           if [ -z "$TUNNEL_URL" ]; then
-            cat tunnel.log && exit 1
+            echo "❌ Could not get a tunnel URL. Tunnel log:"
+            cat tunnel.log
+            exit 1
           fi
-          
+
+          echo ""
           echo "╔═══════════════════════════════════════════════════════════════════╗"
           echo "║              🎉  Y O U R   L L M   I S   R E A D Y  🎉             ║"
           echo "╠═══════════════════════════════════════════════════════════════════╣"
           echo "║  🔗  $TUNNEL_URL"
           echo "╚═══════════════════════════════════════════════════════════════════╝"
-          
+
           {
-            echo "## 🧠 Your DeepSeek / Qwen UI is live"
+            echo "## 🦙 Your LLM web UI is live"
+            echo ""
             echo "**URL:** $TUNNEL_URL"
+            echo ""
             echo "**Model:** \`${MODEL_NAME}\`  |  **Context:** ${CONTEXT_SIZE} tokens"
+            echo ""
+            echo "> This link stays live for as long as this job keeps running (up to the 120-minute timeout, or until you cancel the run)."
           } >> "$GITHUB_STEP_SUMMARY"
-          
+
+          # Keep the job (and tunnel) alive until it's cancelled or times out.
           wait "$TUNNEL_PID"
 
       - name: 🧹 Cleanup
@@ -573,3 +861,4 @@ jobs:
           pkill -f "cloudflared" 2>/dev/null || true
           pkill -f "python ollama_server" 2>/dev/null || true
           pkill -f "ollama serve" 2>/dev/null || true
+          echo "✅ Cleanup complete"
