@@ -1,72 +1,8 @@
-name: 🦙 Local LLM Web Interface
-
-# ────────────────────────────────────────────────────────────────────────
-# WHAT THIS DOES
-#   Spins up an Ollama model + a polished chat UI on a GitHub-hosted
-#   runner, and exposes it to you over a temporary Cloudflare Tunnel.
-#
-# HARD LIMITS OF A STANDARD GITHUB RUNNER (read before picking a model)
-#   • ~14 GB free disk, ~16 GB RAM, 4 vCPU, CPU-only (no GPU)
-#   • That rules out anything above ~14B parameters at 4-bit quantization.
-#   Every model below is a real, verified Ollama library tag chosen to
-#   reliably fit on a standard runner. A disk-cleanup step buys extra
-#   headroom for the larger end of the list.
-#
-#   If your org has access to GitHub's larger runners (more RAM/disk),
-#   change `runs-on` below and you can add bigger models to the list.
-# ────────────────────────────────────────────────────────────────────────
+name: 🦙 Local LLM Web Interface (All Models)
 
 on:
   workflow_dispatch:
     inputs:
-      model:
-        description: '📦 Model to run (all verified to fit on a standard runner)'
-        required: false
-        default: 'llama3.2:3b'
-        type: choice
-        options:
-          # ── Ultra-light, <1GB — fastest, good for quick tests ──
-          - 'qwen2.5:0.5b'
-          - 'qwen3:0.6b'
-          - 'smollm2:360m'
-          - 'tinyllama:1.1b'
-          # ── Small, 1-2GB — solid everyday chat on CPU ──
-          - 'llama3.2:1b'
-          - 'gemma3:1b'
-          - 'qwen2.5:1.5b'
-          - 'qwen3:1.7b'
-          - 'smollm2:1.7b'
-          - 'stablelm2:1.6b'
-          # ── Balanced, 2-4GB — noticeably smarter, still fast ──
-          - 'llama3.2:3b'
-          - 'gemma2:2b'
-          - 'gemma3:4b'
-          - 'qwen2.5:3b'
-          - 'qwen3:4b'
-          - 'phi3:mini'
-          - 'phi4-mini'
-          - 'falcon3:3b'
-          - 'granite3-dense:2b'
-          # ── Capable, 4-6GB — best quality/speed tradeoff on CPU ──
-          - 'mistral:7b'
-          - 'llama3.1:8b'
-          - 'llama3:8b'
-          - 'qwen2.5:7b'
-          - 'qwen3:8b'
-          - 'deepseek-r1:7b'
-          - 'deepseek-r1:8b'
-          - 'codellama:7b'
-          - 'starcoder2:7b'
-          - 'gemma2:9b'
-          - 'aya:8b'
-          - 'olmo2:7b'
-          - 'granite3-dense:8b'
-          # ── Largest that reliably fits, 8-10GB — expect slower replies ──
-          - 'gemma3:12b'
-          - 'olmo2:13b'
-          - 'qwen2.5:14b'
-          - 'deepseek-r1:14b'
-          - 'phi4:14b'
       port:
         description: '🔌 Web UI port'
         required: false
@@ -77,6 +13,7 @@ on:
         required: false
         default: '4096'
         type: string
+      # model input removed – all models are downloaded unconditionally
 
 permissions:
   contents: read
@@ -88,9 +25,8 @@ concurrency:
 jobs:
   deploy-llama:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 180          # extra time for downloading many models
     env:
-      MODEL_NAME: ${{ inputs.model }}
       CONTEXT_SIZE: ${{ inputs.context_size }}
       PORT: ${{ inputs.port }}
 
@@ -98,9 +34,8 @@ jobs:
       - name: 🦙 Show banner
         run: |
           echo "╔═══════════════════════════════════════════════════════════════════╗"
-          echo "║            🦙  L O C A L   L L M   W E B   U I                    ║"
+          echo "║   🦙  L O C A L   L L M   W E B   U I   ( A L L   M O D E L S ) ║"
           echo "╚═══════════════════════════════════════════════════════════════════╝"
-          echo "  📦 Model:   ${MODEL_NAME}"
           echo "  📝 Context: ${CONTEXT_SIZE} tokens"
           echo "  🔌 Port:    ${PORT}"
           echo "  🏃 Runner:  $(uname -a)"
@@ -110,9 +45,6 @@ jobs:
           df -h / | tail -1
 
       - name: 🧹 Free up disk space
-        # Standard runners ship with ~30-40GB of preinstalled toolchains we
-        # don't need (Android SDK, .NET, GHC, extra docker images, etc).
-        # Removing them buys real headroom for the model download.
         run: |
           echo "──────────────────────────────────────────"
           echo " 🧹  Reclaiming disk space"
@@ -139,23 +71,16 @@ jobs:
             jinja2 websockets pydantic
           ollama --version
           python --version
-          echo "✅ Dependencies installed"
 
       - name: 🚀 Start Ollama server
         run: |
           echo "──────────────────────────────────────────"
           echo " 🚀  Starting Ollama"
           echo "──────────────────────────────────────────"
-
-          # The install script auto-registers/starts an "ollama" systemd
-          # service on Linux. Stop it first so we have a single, known
-          # server process instead of two fighting over the same port.
           sudo systemctl stop ollama 2>/dev/null || true
           sudo systemctl disable ollama 2>/dev/null || true
-
           nohup ollama serve > /tmp/ollama.log 2>&1 &
           echo $! > /tmp/ollama.pid
-
           echo "⏳ Waiting for Ollama to become ready..."
           ready=false
           for i in $(seq 1 30); do
@@ -166,40 +91,85 @@ jobs:
             fi
             sleep 2
           done
-
           if [ "$ready" != "true" ]; then
             echo "❌ Ollama failed to start. Last logs:"
             tail -n 50 /tmp/ollama.log || true
             exit 1
           fi
 
-      - name: 📥 Download model
+      - name: 📥 Download ALL models
         run: |
           echo "──────────────────────────────────────────"
-          echo " 📥  Downloading model: ${MODEL_NAME}"
+          echo " 📥  Downloading ALL models from the list"
           echo "──────────────────────────────────────────"
-          echo "⏳ This can take a few minutes depending on model size..."
+          echo "⚠️  This will consume a lot of disk space and time."
+          echo "    If you run out of space, the job will fail."
 
-          if ! ollama pull "$MODEL_NAME"; then
-            echo "❌ Model pull failed (often disk space or network). Disk state:"
-            df -h /
-            exit 1
-          fi
+          # All models from the original choice list (verified to fit individually)
+          MODELS=(
+            "qwen2.5:0.5b"
+            "qwen3:0.6b"
+            "smollm2:360m"
+            "tinyllama:1.1b"
+            "llama3.2:1b"
+            "gemma3:1b"
+            "qwen2.5:1.5b"
+            "qwen3:1.7b"
+            "smollm2:1.7b"
+            "stablelm2:1.6b"
+            "llama3.2:3b"
+            "gemma2:2b"
+            "gemma3:4b"
+            "qwen2.5:3b"
+            "qwen3:4b"
+            "phi3:mini"
+            "phi4-mini"
+            "falcon3:3b"
+            "granite3-dense:2b"
+            "mistral:7b"
+            "llama3.1:8b"
+            "llama3:8b"
+            "qwen2.5:7b"
+            "qwen3:8b"
+            "deepseek-r1:7b"
+            "deepseek-r1:8b"
+            "codellama:7b"
+            "starcoder2:7b"
+            "gemma2:9b"
+            "aya:8b"
+            "olmo2:7b"
+            "granite3-dense:8b"
+            "gemma3:12b"
+            "olmo2:13b"
+            "qwen2.5:14b"
+            "deepseek-r1:14b"
+            "phi4:14b"
+          )
 
-          if ! ollama list | grep -q "$(echo "$MODEL_NAME" | cut -d: -f1)"; then
-            echo "❌ Model does not appear in 'ollama list' after pull."
-            ollama list
-            exit 1
-          fi
+          total=${#MODELS[@]}
+          current=0
+          for model in "${MODELS[@]}"; do
+            current=$((current + 1))
+            echo ""
+            echo "──────────────────────────────────────────"
+            echo " [$current/$total] Pulling $model"
+            echo "──────────────────────────────────────────"
+            if ! ollama pull "$model"; then
+              echo "❌ Failed to pull $model – continuing anyway"
+            fi
+            echo "  💽 Disk usage now:"
+            df -h / | tail -1
+          done
 
-          echo "✅ Model ready:"
+          echo ""
+          echo "✅ All pulls attempted. Final model list:"
           ollama list
 
-      - name: 🔧 Write the web server
+      - name: 🔧 Write the web server (with model selector)
         run: |
           cat > ollama_server.py << 'PYEOF'
           #!/usr/bin/env python3
-          """Ollama-backed chat web server with a polished, full-markdown UI."""
+          """Ollama-backed chat web server with a model selector UI."""
 
           import json
           import os
@@ -217,22 +187,19 @@ jobs:
 
           OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
           CONTEXT_SIZE = int(os.getenv("CONTEXT_SIZE", "4096"))
-          MODEL_NAME = os.getenv("MODEL_NAME", "llama3.2:3b")
           PORT = int(os.getenv("PORT", "7860"))
 
-          app = FastAPI(title="Local LLM UI")
-
+          app = FastAPI(title="Local LLM UI (All Models)")
 
           class ChatMessage(BaseModel):
               role: str
               content: str
 
-
           class ChatRequest(BaseModel):
               messages: List[ChatMessage]
+              model: str                    # now required; frontend sends selected model
               temperature: Optional[float] = 0.7
               max_tokens: Optional[int] = 2048
-
 
           @app.get("/api/health")
           async def health():
@@ -240,19 +207,26 @@ jobs:
                   async with httpx.AsyncClient(timeout=5) as client:
                       r = await client.get(f"{OLLAMA_HOST}/api/tags")
                       r.raise_for_status()
-                  return {"status": "ok", "model": MODEL_NAME}
+                  return {"status": "ok"}
               except Exception as exc:
                   raise HTTPException(status_code=503, detail=str(exc))
 
+          @app.get("/api/models")
+          async def list_models():
+              """Return the list of models available in Ollama."""
+              try:
+                  async with httpx.AsyncClient(timeout=5) as client:
+                      r = await client.get(f"{OLLAMA_HOST}/api/tags")
+                      r.raise_for_status()
+                      data = r.json()
+                      models = [m["name"] for m in data.get("models", [])]
+                      return {"models": models}
+              except Exception as exc:
+                  raise HTTPException(status_code=503, detail=str(exc))
 
           @app.get("/", response_class=HTMLResponse)
           async def root():
-              return (
-                  HTML_TEMPLATE
-                  .replace("__MODEL_NAME__", MODEL_NAME)
-                  .replace("__CONTEXT_SIZE__", str(CONTEXT_SIZE))
-              )
-
+              return HTML_TEMPLATE
 
           @app.post("/api/chat")
           async def chat(request: ChatRequest):
@@ -265,7 +239,7 @@ jobs:
                               "POST",
                               f"{OLLAMA_HOST}/api/chat",
                               json={
-                                  "model": MODEL_NAME,
+                                  "model": request.model,          # use the selected model
                                   "messages": ollama_messages,
                                   "stream": True,
                                   "options": {
@@ -302,23 +276,20 @@ jobs:
 
               return StreamingResponse(generate(), media_type="text/event-stream")
 
-
+          # ---------- HTML template with model selector dropdown ----------
           HTML_TEMPLATE = r'''
           <!DOCTYPE html>
           <html lang="en">
           <head>
           <meta charset="UTF-8">
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <title>Local LLM · __MODEL_NAME__</title>
+          <title>Local LLM · all models</title>
 
-          <!-- Markdown (GFM: tables, task lists, strikethrough, autolinks) -->
+          <!-- Markdown (GFM) -->
           <script src="https://cdn.jsdelivr.net/npm/marked@4.3.0/marked.min.js"></script>
-          <!-- Sanitize model-generated HTML before it ever hits innerHTML -->
           <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.6/purify.min.js"></script>
-          <!-- Code syntax highlighting -->
           <link id="hljsTheme" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
           <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-          <!-- Math: $inline$, $$block$$, \( \), \[ \] -->
           <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
           <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
           <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/contrib/auto-render.min.js"></script>
@@ -456,7 +427,10 @@ jobs:
             .settings-group { display: flex; flex-direction: column; gap: 10px; font-size: 13px; color: var(--text-secondary); margin-bottom: 16px; }
             .settings-group label { display: flex; justify-content: space-between; align-items: center; }
             .settings-group input[type="range"] { width: 130px; accent-color: var(--accent); }
-
+            #modelSelect {
+              background: var(--input-bg); color: var(--text); border: 1px solid var(--border);
+              border-radius: 6px; padding: 6px 10px; font-size: 13px; width: 100%; margin-bottom: 12px;
+            }
             @media (max-width: 720px) {
               .sidebar { position: fixed; z-index: 20; height: 100vh; transform: translateX(-100%); }
               .sidebar.open { transform: translateX(0); }
@@ -477,13 +451,15 @@ jobs:
                 <span id="themeLabel">🌙 Dark mode</span>
               </button>
               <div class="settings-group">
+                <label>Model:</label>
+                <select id="modelSelect"></select>
                 <label>Temperature: <span id="tempVal">0.7</span></label>
                 <input type="range" id="temperature" min="0" max="2" step="0.1" value="0.7">
                 <label>Max tokens: <span id="tokenVal">2048</span></label>
                 <input type="range" id="maxTokens" min="128" max="4096" step="128" value="2048">
               </div>
               <div class="sidebar-footer">
-                <span class="model-tag">📦 __MODEL_NAME__</span>
+                <span class="model-tag" id="currentModelTag">📦</span>
                 <span id="statusIndicator"><span class="status-dot ok"></span>Checking...</span>
                 <span id="tokenCounter">Tokens (approx): 0</span>
               </div>
@@ -587,14 +563,52 @@ jobs:
             const statusIndicator = document.getElementById('statusIndicator');
             const temperatureEl = document.getElementById('temperature');
             const maxTokensEl = document.getElementById('maxTokens');
+            const modelSelect = document.getElementById('modelSelect');
+            const currentModelTag = document.getElementById('currentModelTag');
             let isStreaming = false;
             let totalTokens = 0;
             let messageHistory = [];
             let controller = null;
+            let currentModel = null;
 
-            renderInto(document.getElementById('welcomeMsg'), "Hello! I'm **__MODEL_NAME__** running locally on this runner. Ask me anything — tables, code, task lists, and math (`$e=mc^2$`) all render here.");
+            // ---------- Fetch models and populate dropdown ----------
+            async function loadModels() {
+              try {
+                const resp = await fetch('/api/models');
+                if (!resp.ok) throw new Error('Failed to fetch models');
+                const data = await resp.json();
+                const models = data.models || [];
+                if (models.length === 0) {
+                  modelSelect.innerHTML = '<option value="">No models found</option>';
+                  return;
+                }
+                // Populate dropdown
+                modelSelect.innerHTML = models.map(m => `<option value="${m}">${m}</option>`).join('');
+                // Select first model by default
+                modelSelect.value = models[0];
+                currentModel = models[0];
+                updateModelTag();
+              } catch (e) {
+                console.error('Error loading models:', e);
+                modelSelect.innerHTML = '<option value="">Error loading models</option>';
+              }
+            }
 
-            // ---------- Persistence (this page only, not a Claude artifact) ----------
+            function updateModelTag() {
+              if (currentModel) {
+                currentModelTag.textContent = '📦 ' + currentModel;
+              } else {
+                currentModelTag.textContent = '📦 (no model)';
+              }
+            }
+
+            modelSelect.addEventListener('change', function() {
+              currentModel = this.value;
+              updateModelTag();
+              saveState();
+            });
+
+            // ---------- Persistence ----------
             function saveState() {
               try {
                 localStorage.setItem(STORE_KEY, JSON.stringify({
@@ -602,9 +616,10 @@ jobs:
                   temperature: temperatureEl.value,
                   maxTokens: maxTokensEl.value,
                   messageHistory,
-                  totalTokens
+                  totalTokens,
+                  model: currentModel
                 }));
-              } catch { /* storage unavailable, ignore */ }
+              } catch { /* ignore */ }
             }
             function restoreState() {
               try {
@@ -614,13 +629,23 @@ jobs:
                 if (s.theme) applyTheme(s.theme);
                 if (s.temperature) { temperatureEl.value = s.temperature; document.getElementById('tempVal').textContent = s.temperature; }
                 if (s.maxTokens) { maxTokensEl.value = s.maxTokens; document.getElementById('tokenVal').textContent = s.maxTokens; }
+                if (s.model) {
+                  // Wait for dropdown to be populated, then set
+                  setTimeout(() => {
+                    if (modelSelect.querySelector(`option[value="${s.model}"]`)) {
+                      modelSelect.value = s.model;
+                      currentModel = s.model;
+                      updateModelTag();
+                    }
+                  }, 100);
+                }
                 if (Array.isArray(s.messageHistory)) {
                   messageHistory = s.messageHistory;
                   totalTokens = s.totalTokens || 0;
                   messageHistory.forEach(m => appendMessage(m.role, m.content));
                   tokenCounter.textContent = `Tokens (approx): ${totalTokens}`;
                 }
-              } catch { /* ignore corrupt storage */ }
+              } catch { /* ignore */ }
             }
 
             async function checkHealth() {
@@ -695,6 +720,10 @@ jobs:
               if (isStreaming) return;
               const text = userInput.value.trim();
               if (!text) return;
+              if (!currentModel) {
+                alert('Please select a model first.');
+                return;
+              }
 
               appendMessage('user', text);
               messageHistory.push({ role: 'user', content: text });
@@ -717,7 +746,12 @@ jobs:
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
                   signal: controller.signal,
-                  body: JSON.stringify({ messages: messageHistory, temperature, max_tokens: maxTokens })
+                  body: JSON.stringify({
+                    messages: messageHistory,
+                    model: currentModel,
+                    temperature,
+                    max_tokens: maxTokens
+                  })
                 });
                 if (!response.ok) throw new Error(`Server returned ${response.status}`);
 
@@ -743,7 +777,7 @@ jobs:
                         fullContent += parsed.content;
                         updateLastAssistantMessage(fullContent, false);
                       }
-                    } catch { /* ignore partial JSON */ }
+                    } catch { /* ignore */ }
                   }
                 }
 
@@ -770,12 +804,24 @@ jobs:
               userInput.focus();
             }
 
-            restoreState();
+            // Load models and restore state
+            loadModels().then(() => {
+              restoreState();
+              // If no model restored, pick first
+              if (!currentModel && modelSelect.options.length > 0) {
+                currentModel = modelSelect.value;
+                updateModelTag();
+              }
+              // Set welcome message with current model
+              const welcome = document.getElementById('welcomeMsg');
+              const modelName = currentModel || 'model';
+              renderInto(welcome, `Hello! I'm **${modelName}** running locally on this runner. Ask me anything — tables, code, task lists, and math (\`$e=mc^2$\`) all render here.`);
+            });
+
           </script>
           </body>
           </html>
           '''
-
           if __name__ == "__main__":
               uvicorn.run(app, host="0.0.0.0", port=PORT, log_level="info")
           PYEOF
@@ -788,7 +834,6 @@ jobs:
           echo "──────────────────────────────────────────"
           nohup python ollama_server.py > /tmp/webui.log 2>&1 &
           echo $! > /tmp/webui.pid
-
           ready=false
           for i in $(seq 1 15); do
             if curl -sf "http://localhost:${PORT}" > /dev/null 2>&1; then
@@ -798,7 +843,6 @@ jobs:
             fi
             sleep 2
           done
-
           if [ "$ready" != "true" ]; then
             echo "❌ Web UI failed to start. Last logs:"
             tail -n 50 /tmp/webui.log || true
@@ -817,10 +861,8 @@ jobs:
           echo "──────────────────────────────────────────"
           echo " 🌐  Creating Cloudflare tunnel"
           echo "──────────────────────────────────────────"
-
           cloudflared tunnel --url "http://127.0.0.1:${PORT}" --protocol http2 > tunnel.log 2>&1 &
           TUNNEL_PID=$!
-
           echo "⏳ Waiting for tunnel URL..."
           TUNNEL_URL=""
           for i in $(seq 1 30); do
@@ -828,31 +870,27 @@ jobs:
             [ -n "$TUNNEL_URL" ] && break
             sleep 2
           done
-
           if [ -z "$TUNNEL_URL" ]; then
             echo "❌ Could not get a tunnel URL. Tunnel log:"
             cat tunnel.log
             exit 1
           fi
-
           echo ""
           echo "╔═══════════════════════════════════════════════════════════════════╗"
           echo "║              🎉  Y O U R   L L M   I S   R E A D Y  🎉             ║"
           echo "╠═══════════════════════════════════════════════════════════════════╣"
           echo "║  🔗  $TUNNEL_URL"
           echo "╚═══════════════════════════════════════════════════════════════════╝"
-
           {
             echo "## 🦙 Your LLM web UI is live"
             echo ""
             echo "**URL:** $TUNNEL_URL"
             echo ""
-            echo "**Model:** \`${MODEL_NAME}\`  |  **Context:** ${CONTEXT_SIZE} tokens"
+            echo "**All models downloaded** – use the dropdown in the sidebar to switch."
+            echo "**Context:** ${CONTEXT_SIZE} tokens"
             echo ""
-            echo "> This link stays live for as long as this job keeps running (up to the 120-minute timeout, or until you cancel the run)."
+            echo "> This link stays live for as long as this job keeps running (up to the timeout, or until you cancel the run)."
           } >> "$GITHUB_STEP_SUMMARY"
-
-          # Keep the job (and tunnel) alive until it's cancelled or times out.
           wait "$TUNNEL_PID"
 
       - name: 🧹 Cleanup
