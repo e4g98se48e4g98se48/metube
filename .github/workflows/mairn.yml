@@ -4,21 +4,64 @@ on:
   workflow_dispatch:
     inputs:
       model:
-        description: '📦 Model to download from Ollama'
+        description: '📦 Model to download from Ollama (Weak to Powerful)'
         required: false
-        default: 'llama3.2:1b'
+        default: 'qwen2.5:0.5b'
         type: choice
         options:
-          - 'llama3.2:1b'
-          - 'llama3.2:3b'
-          - 'llama3.1:8b'
-          - 'phi3:mini'
-          - 'mistral:7b'
-          - 'gemma:2b'
-          - 'tinyllama:1.1b'
+          # Ultra-Lightweight & Fast (0.5B - 2B)
           - 'qwen2.5:0.5b'
           - 'qwen2.5:1.5b'
-          - 'llama2:7b'
+          - 'llama3.2:1b'
+          - 'tinyllama:1.1b'
+          - 'gemma:2b'
+          - 'llama3.2:3b'
+          - 'phi3:mini'
+          - 'stablelm2:1.6b'
+          - 'granite3-dense:2b'
+          - 'deepseek-r1:1.5b'
+          # Mid-Range Performance (3B - 8B)
+          - 'phi3:38b-mini' # fallback placeholder/standard
+          - 'qwen2.5:3b'
+          - 'llama3.2:3b-instruct-q4_K_M'
+          - 'minicpm-v:8b'
+          - 'gemma2:2b'
+          - 'gemma2:9b'
+          - 'mistral:7b'
+          - 'llama3.1:8b'
+          - 'qwen2.5:7b'
+          - 'phi3:14b'
+          - 'deepseek-r1:7b'
+          - 'deepseek-r1:8b'
+          - 'codellama:7b'
+          - 'codellama:13b'
+          - 'llama3:8b'
+          # High-Performance / Large Models (12B - 70B+)
+          - 'qwen2.5:14b'
+          - 'qwen2.5:32b'
+          - 'qwen2.5:72b'
+          - 'llama3.1:70b'
+          - 'llama3:70b'
+          - 'mistral-nemo:12b'
+          - 'mixtral:8x7b'
+          - 'mixtral:8x22b'
+          - 'command-r:35b'
+          - 'command-r-plus:104b'
+          - 'deepseek-r1:14b'
+          - 'deepseek-r1:32b'
+          - 'deepseek-r1:70b'
+          - 'deepseek-r1:671b'
+          - 'gemma2:27b'
+          - 'phi4:14b'
+          - 'llama3.3:70b'
+          - 'llama-3-70b-instruct'
+          - 'vicuna:7b'
+          - 'vicuna:13b'
+          - 'wizardlm2:7b'
+          - 'wizardlm2:8b'
+          - 'solar:10.7b'
+          - 'aya:8b'
+          - 'glm4:9b'
       port:
         description: '🔌 Web UI port'
         required: false
@@ -43,7 +86,7 @@ jobs:
         run: |
           echo "╔═══════════════════════════════════════════════════════════════════╗"
           echo "║                                                                   ║"
-          echo "║            🦙  L L A M A   1 B   W E B   U I                      ║"
+          echo "║            🦙  L L A M A   W E B   U I   (50 MODELS)              ║"
           echo "║                                                                   ║"
           echo "╚═══════════════════════════════════════════════════════════════════╝"
           echo ""
@@ -87,6 +130,23 @@ jobs:
           python --version
           echo "✅ Dependencies installed!"
 
+      - name: 🚀 Start Ollama Server
+        run: |
+          echo "──────────────────────────────────────────"
+          echo " 🚀  Starting Ollama server in background"
+          echo "──────────────────────────────────────────"
+          
+          ollama serve &
+          
+          echo "⏳ Waiting for Ollama to be ready..."
+          for i in {1..30}; do
+            if curl -s http://localhost:11434/api/tags > /dev/null 2>&1; then
+              echo "✅ Ollama is ready!"
+              break
+            fi
+            sleep 2
+          done
+
       - name: 📥 Download Model from Ollama
         run: |
           echo "──────────────────────────────────────────"
@@ -95,7 +155,7 @@ jobs:
           
           MODEL="${{ github.event.inputs.model }}"
           
-          echo "⏳ This may take 3-10 minutes depending on model size..."
+          echo "⏳ This may take 3-15 minutes depending on model size..."
           echo ""
           
           # Download the model
@@ -139,7 +199,7 @@ jobs:
           # Configuration
           OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
           CONTEXT_SIZE = int(os.getenv("CONTEXT_SIZE", "4096"))
-          MODEL_NAME = os.getenv("MODEL_NAME", "llama3.2:1b")
+          MODEL_NAME = os.getenv("MODEL_NAME", "qwen2.5:0.5b")
           PORT = int(os.getenv("PORT", "7860"))
           
           app = FastAPI(title="🦙 Llama ChatGPT UI", description="Local LLM Interface")
@@ -455,7 +515,6 @@ jobs:
               </div>
 
               <script>
-                  // Configure marked with highlight.js
                   marked.setOptions({
                       highlight: function(code, lang) {
                           if (lang && hljs.getLanguage(lang)) {
@@ -466,7 +525,6 @@ jobs:
                       breaks: true
                   });
 
-                  // Initialize welcome message markdown parsing
                   document.getElementById('welcomeMsg').innerHTML = marked.parse("Hello! I'm running **{{ model_name }}** locally through your interface. How can I help you today?");
 
                   const chatContainer = document.getElementById('chatContainer');
@@ -530,7 +588,6 @@ jobs:
                       if (textBody) {
                           if (isComplete) {
                               textBody.innerHTML = marked.parse(content);
-                              // Trigger syntax highlighting updates
                               textBody.querySelectorAll('pre code').forEach((block) => {
                                   hljs.highlightElement(block);
                               });
@@ -683,23 +740,6 @@ jobs:
           EOF
           
           echo "✅ Server script created!"
-
-      - name: 🚀 Start Ollama Server
-        run: |
-          echo "──────────────────────────────────────────"
-          echo " 🚀  Starting Ollama server"
-          echo "──────────────────────────────────────────"
-          
-          ollama serve &
-          
-          echo "⏳ Waiting for Ollama to be ready..."
-          for i in {1..30}; do
-            if curl -s http://localhost:11434/api/tags > /dev/null 2>&1; then
-              echo "✅ Ollama is ready!"
-              break
-            fi
-            sleep 2
-          done
 
       - name: 🔧 Start Web Server
         run: |
