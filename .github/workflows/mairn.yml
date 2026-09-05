@@ -1,71 +1,35 @@
-name: 🦙 Llama 1B Web Interface
+name: 🦙 Llama Web Interface
 
 on:
   workflow_dispatch:
     inputs:
       model:
-        description: '📦 Model to download from Ollama (Weak to Powerful)'
+        description: '📦 Model to download'
         required: false
         default: 'qwen2.5:0.5b'
         type: choice
         options:
-          # Ultra-Lightweight & Fast (0.5B - 2B)
           - 'qwen2.5:0.5b'
           - 'qwen2.5:1.5b'
           - 'llama3.2:1b'
-          - 'tinyllama:1.1b'
-          - 'gemma:2b'
-          - 'stablelm2:1.6b'
-          - 'granite3-dense:2b'
-          - 'deepseek-r1:1.5b'
-          - 'qwen2.5:3b'
           - 'llama3.2:3b'
-          # Mid-Range Performance (3B - 8B)
           - 'phi3:mini'
-          - 'gemma2:2b'
-          - 'gemma2:9b'
           - 'mistral:7b'
           - 'llama3.1:8b'
-          - 'qwen2.5:7b'
-          - 'phi3:14b'
-          - 'deepseek-r1:7b'
-          - 'deepseek-r1:8b'
-          - 'codellama:7b'
-          - 'codellama:13b'
           - 'llama3:8b'
-          - 'minicpm-v:8b'
-          - 'solar:10.7b'
-          - 'aya:8b'
-          # High-Performance / Large Models (12B - 70B+)
-          - 'mistral-nemo:12b'
-          - 'qwen2.5:14b'
-          - 'phi4:14b'
-          - 'deepseek-r1:14b'
-          - 'gemma2:27b'
-          - 'command-r:35b'
-          - 'qwen2.5:32b'
-          - 'deepseek-r1:32b'
-          - 'mixtral:8x7b'
-          - 'glm4:9b'
           - 'llama3.1:70b'
-          - 'llama3:70b'
           - 'llama3.3:70b'
-          - 'qwen2.5:72b'
-          - 'deepseek-r1:70b'
-          - 'mixtral:8x22b'
-          - 'command-r-plus:104b'
-          - 'deepseek-r1:671b'
-          - 'vicuna:7b'
-          - 'vicuna:13b'
-          - 'wizardlm2:7b'
-          - 'wizardlm2:8b'
+          - 'qwen2.5:32b'
+          - 'deepseek-r1:7b'
+          - 'deepseek-r1:14b'
+          - 'deepseek-r1:32b'
       port:
         description: '🔌 Web UI port'
         required: false
         default: '7860'
         type: string
       context_size:
-        description: '📝 Context size (tokens)'
+        description: '📝 Context size'
         required: false
         default: '4096'
         type: string
@@ -83,7 +47,7 @@ jobs:
         run: |
           echo "╔═══════════════════════════════════════════════════════════════════╗"
           echo "║                                                                   ║"
-          echo "║            🦙  C L A U D E - S T Y L E   L L A M A   U I          ║"
+          echo "║            🦙  L L A M A   W E B   I N T E R F A C E              ║"
           echo "║                                                                   ║"
           echo "╚═══════════════════════════════════════════════════════════════════╝"
           echo ""
@@ -103,7 +67,7 @@ jobs:
       - name: 📦 Install Dependencies
         run: |
           echo "──────────────────────────────────────────"
-          echo " 📦  Installing required packages"
+          echo " 📦 Installing required packages"
           echo "──────────────────────────────────────────"
           
           # Install Ollama
@@ -114,27 +78,29 @@ jobs:
           echo "🐍 Installing Python packages..."
           pip install --no-cache-dir \
             fastapi \
-            uvicorn \
+            uvicorn[standard] \
             aiohttp \
             httpx \
             python-multipart \
             jinja2 \
-            websockets \
-            pydantic
+            pydantic \
+            websockets
 
-          ollama --version || echo "⚠️ Ollama version check"
+          ollama --version || echo "⚠️ Ollama installed"
           python --version
           echo "✅ Dependencies installed!"
 
-      - name: 🚀 Start Ollama Server First
+      - name: 🚀 Start Ollama Server
         run: |
           echo "──────────────────────────────────────────"
-          echo " 🚀  Starting Ollama server in background"
+          echo " 🚀 Starting Ollama server"
           echo "──────────────────────────────────────────"
           
+          # Start Ollama in background
           ollama serve &
           
-          echo "⏳ Waiting for Ollama service to be ready..."
+          # Wait for Ollama to be ready
+          echo "⏳ Waiting for Ollama service..."
           for i in {1..30}; do
             if curl -s http://localhost:11434/api/tags > /dev/null 2>&1; then
               echo "✅ Ollama is ready!"
@@ -143,279 +109,352 @@ jobs:
             sleep 2
           done
 
-      - name: 📥 Download Model from Ollama
+      - name: 📥 Download Model
         run: |
           echo "──────────────────────────────────────────"
-          echo " 📥  Downloading model: ${{ github.event.inputs.model }}"
+          echo " 📥 Downloading model: ${{ github.event.inputs.model }}"
           echo "──────────────────────────────────────────"
           
           MODEL="${{ github.event.inputs.model }}"
           
-          echo "⏳ This may take 3-15 minutes depending on model size..."
-          echo ""
+          echo "⏳ This may take 3-15 minutes..."
           ollama pull "$MODEL"
+          
           echo ""
           echo "✅ Model downloaded successfully!"
           echo "📊 Installed models:"
           ollama list
 
-      - name: 🔧 Create Ollama Server Script
+      - name: 🔧 Create Web Server
         run: |
-          cat > ollama_server.py << 'EOF'
+          cat > app.py << 'EOF'
           #!/usr/bin/env python3
           """
-          🦙 Ollama Web Server - Claude UI Styling with Markdown & Code Highlights
+          🦙 Ollama Web Interface - Complete Fixed Version
           """
           
           import json
           import asyncio
-          import subprocess
-          import shutil
-          from pathlib import Path
-          from typing import Optional, Dict, List, Any
+          import os
+          import logging
+          from typing import List, Optional, AsyncGenerator
           from fastapi import FastAPI, HTTPException, Request
-          from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+          from fastapi.responses import HTMLResponse, StreamingResponse
           from pydantic import BaseModel
           import uvicorn
           import httpx
-          import logging
-          import os
           
+          # Configure logging
           logging.basicConfig(level=logging.INFO)
           logger = logging.getLogger(__name__)
           
+          # Environment variables
           OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
           CONTEXT_SIZE = int(os.getenv("CONTEXT_SIZE", "4096"))
           MODEL_NAME = os.getenv("MODEL_NAME", "qwen2.5:0.5b")
           PORT = int(os.getenv("PORT", "7860"))
           
-          app = FastAPI(title="Claude Local UI", description="Local LLM Interface")
+          app = FastAPI(title="Ollama Web UI")
           
-          class ChatMessage(BaseModel):
+          # Models
+          class Message(BaseModel):
               role: str
               content: str
           
           class ChatRequest(BaseModel):
-              messages: List[ChatMessage]
-              temperature: Optional[float] = 0.7
-              max_tokens: Optional[int] = 2048
-              stream: Optional[bool] = True
+              messages: List[Message]
+              temperature: float = 0.7
+              max_tokens: int = 2048
+              stream: bool = True
           
+          # HTML Template - Complete Modern UI
           HTML_TEMPLATE = '''
           <!DOCTYPE html>
           <html lang="en">
           <head>
               <meta charset="UTF-8">
               <meta name="viewport" content="width=device-width, initial-scale=1.0">
-              <title>Claude - Local LLM</title>
-              <!-- Marked.js for Markdown -->
-              <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-              <!-- Highlight.js for Code Highlighting -->
+              <title>🦙 Ollama UI</title>
               <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
               <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+              <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
               <style>
-                  :root {
-                      --claude-bg: #fdfbf7;
-                      --claude-sidebar: #f4efe6;
-                      --claude-border: #e6dfd5;
-                      --claude-text: #383735;
-                      --claude-text-secondary: #73716b;
-                      --claude-accent: #cc785c;
-                      --claude-user-bg: #f4efe6;
-                      --claude-assistant-bg: #ffffff;
-                      --claude-input-bg: #ffffff;
-                  }
                   * {
                       margin: 0;
                       padding: 0;
                       box-sizing: border-box;
                   }
+                  
+                  :root {
+                      --bg-primary: #0a0a0f;
+                      --bg-secondary: #14141e;
+                      --bg-card: #1a1a2e;
+                      --bg-input: #1e1e32;
+                      --text-primary: #e4e4e7;
+                      --text-secondary: #a0a0b8;
+                      --accent: #6c5ce7;
+                      --accent-hover: #7d6ff0;
+                      --accent-glow: rgba(108, 92, 231, 0.3);
+                      --border-color: #2a2a44;
+                      --user-bubble: #2d2d4a;
+                      --assistant-bubble: #1a1a2e;
+                      --shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+                  }
+                  
                   body {
-                      background: var(--claude-bg);
-                      color: var(--claude-text);
-                      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+                      background: var(--bg-primary);
+                      color: var(--text-primary);
+                      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
                       height: 100vh;
                       display: flex;
                       overflow: hidden;
                   }
+                  
+                  /* Sidebar */
                   .sidebar {
                       width: 280px;
-                      background: var(--claude-sidebar);
-                      border-right: 1px solid var(--claude-border);
+                      background: var(--bg-secondary);
+                      border-right: 1px solid var(--border-color);
                       display: flex;
                       flex-direction: column;
-                      padding: 16px;
+                      padding: 20px;
                       flex-shrink: 0;
                   }
+                  
+                  .sidebar-header {
+                      display: flex;
+                      align-items: center;
+                      gap: 12px;
+                      margin-bottom: 24px;
+                  }
+                  
+                  .sidebar-header h1 {
+                      font-size: 20px;
+                      font-weight: 700;
+                      background: linear-gradient(135deg, var(--accent), #a78bfa);
+                      -webkit-background-clip: text;
+                      -webkit-text-fill-color: transparent;
+                  }
+                  
                   .new-chat-btn {
                       display: flex;
                       align-items: center;
+                      justify-content: center;
                       gap: 10px;
                       width: 100%;
-                      padding: 10px 14px;
-                      background: #ffffff;
-                      border: 1px solid var(--claude-border);
-                      border-radius: 8px;
-                      color: var(--claude-text);
+                      padding: 12px;
+                      background: var(--accent);
+                      border: none;
+                      border-radius: 10px;
+                      color: white;
                       font-size: 14px;
-                      font-weight: 500;
+                      font-weight: 600;
                       cursor: pointer;
-                      box-shadow: 0 1px 2px rgba(0,0,0,0.03);
-                      transition: background 0.2s, border-color 0.2s;
+                      transition: all 0.3s ease;
                       margin-bottom: 20px;
                   }
+                  
                   .new-chat-btn:hover {
-                      background: #faf8f5;
-                      border-color: #d1c7bc;
+                      background: var(--accent-hover);
+                      transform: translateY(-1px);
+                      box-shadow: 0 4px 20px var(--accent-glow);
                   }
+                  
+                  .settings-group {
+                      background: var(--bg-card);
+                      border-radius: 10px;
+                      padding: 16px;
+                      margin-bottom: 16px;
+                  }
+                  
+                  .settings-group label {
+                      display: flex;
+                      justify-content: space-between;
+                      align-items: center;
+                      font-size: 13px;
+                      color: var(--text-secondary);
+                      margin-bottom: 8px;
+                  }
+                  
+                  .settings-group input[type="range"] {
+                      width: 100%;
+                      height: 4px;
+                      -webkit-appearance: none;
+                      background: var(--border-color);
+                      border-radius: 2px;
+                      outline: none;
+                  }
+                  
+                  .settings-group input[type="range"]::-webkit-slider-thumb {
+                      -webkit-appearance: none;
+                      width: 16px;
+                      height: 16px;
+                      border-radius: 50%;
+                      background: var(--accent);
+                      cursor: pointer;
+                      box-shadow: 0 0 20px var(--accent-glow);
+                  }
+                  
                   .sidebar-footer {
                       margin-top: auto;
-                      border-top: 1px solid var(--claude-border);
-                      padding-top: 14px;
-                      font-size: 13px;
-                      color: var(--claude-text-secondary);
-                      display: flex;
-                      flex-direction: column;
-                      gap: 8px;
+                      padding-top: 16px;
+                      border-top: 1px solid var(--border-color);
                   }
+                  
                   .model-tag {
-                      background: rgba(204, 120, 92, 0.12);
-                      color: var(--claude-accent);
-                      padding: 4px 8px;
-                      border-radius: 6px;
+                      display: inline-block;
+                      padding: 4px 12px;
+                      background: var(--accent-glow);
+                      color: var(--accent);
+                      border-radius: 20px;
                       font-size: 12px;
                       font-weight: 600;
-                      width: fit-content;
+                      margin-bottom: 8px;
                   }
+                  
+                  .status-indicator {
+                      display: flex;
+                      align-items: center;
+                      gap: 8px;
+                      font-size: 13px;
+                      color: var(--text-secondary);
+                  }
+                  
+                  .status-dot {
+                      width: 8px;
+                      height: 8px;
+                      border-radius: 50%;
+                      background: #4ade80;
+                      animation: pulse 2s infinite;
+                  }
+                  
+                  @keyframes pulse {
+                      0%, 100% { opacity: 1; }
+                      50% { opacity: 0.3; }
+                  }
+                  
+                  /* Main Content */
                   .main-content {
                       flex: 1;
                       display: flex;
                       flex-direction: column;
-                      height: 100vh;
                       position: relative;
-                      background: var(--claude-bg);
                   }
+                  
                   .chat-container {
                       flex: 1;
                       overflow-y: auto;
-                      display: flex;
-                      flex-direction: column;
-                      padding: 20px 0 140px 0;
+                      padding: 20px 24px 160px 24px;
                       scroll-behavior: smooth;
                   }
-                  .message-row {
-                      width: 100%;
-                      display: flex;
-                      justify-content: center;
-                      padding: 24px 16px;
-                      border-bottom: 1px solid rgba(230, 223, 213, 0.4);
-                  }
-                  .message-row.user {
-                      background: var(--claude-user-bg);
-                  }
-                  .message-row.assistant {
-                      background: var(--claude-assistant-bg);
-                  }
-                  .message-inner {
-                      max-width: 768px;
-                      width: 100%;
+                  
+                  .message {
                       display: flex;
                       gap: 16px;
-                      line-height: 1.7;
-                      font-size: 15px;
+                      padding: 20px 0;
+                      border-bottom: 1px solid var(--border-color);
+                      animation: fadeIn 0.3s ease;
                   }
-                  .avatar {
-                      width: 32px;
-                      height: 32px;
+                  
+                  @keyframes fadeIn {
+                      from { opacity: 0; transform: translateY(10px); }
+                      to { opacity: 1; transform: translateY(0); }
+                  }
+                  
+                  .message-avatar {
+                      width: 36px;
+                      height: 36px;
                       border-radius: 50%;
                       display: flex;
                       align-items: center;
                       justify-content: center;
-                      font-size: 15px;
+                      font-size: 16px;
                       flex-shrink: 0;
                   }
-                  .avatar.user { background: #383735; color: #fff; }
-                  .avatar.assistant { background: var(--claude-accent); color: #fff; }
-                  .message-body {
-                      flex: 1;
-                      overflow-x: auto;
+                  
+                  .message-avatar.user {
+                      background: var(--accent);
                   }
                   
-                  /* Markdown Customization for Claude Theme */
-                  .message-body p { margin-bottom: 12px; }
-                  .message-body p:last-child { margin-bottom: 0; }
-                  .message-body pre {
-                      background: #1e1e1e;
-                      color: #d4d4d4;
-                      padding: 14px;
+                  .message-avatar.assistant {
+                      background: var(--bg-card);
+                      border: 1px solid var(--border-color);
+                  }
+                  
+                  .message-content {
+                      flex: 1;
+                      line-height: 1.7;
+                      font-size: 15px;
+                      min-width: 0;
+                  }
+                  
+                  .message-content pre {
+                      background: #0d0d1a;
+                      padding: 16px;
                       border-radius: 8px;
                       overflow-x: auto;
                       margin: 12px 0;
-                      border: 1px solid #333;
+                      border: 1px solid var(--border-color);
                   }
-                  .message-body code {
-                      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+                  
+                  .message-content code {
+                      font-family: 'Fira Code', 'Consolas', monospace;
                       font-size: 13px;
-                      background: rgba(0,0,0,0.06);
-                      padding: 2px 5px;
-                      border-radius: 4px;
                   }
-                  .message-body pre code {
-                      background: transparent;
-                      padding: 0;
-                      color: inherit;
-                  }
-                  .message-body ul, .message-body ol {
-                      padding-left: 22px;
+                  
+                  .message-content p {
                       margin-bottom: 12px;
                   }
-                  .message-body blockquote {
-                      border-left: 3px solid var(--claude-accent);
-                      padding-left: 12px;
-                      color: var(--claude-text-secondary);
+                  
+                  .message-content p:last-child {
+                      margin-bottom: 0;
+                  }
+                  
+                  .message-content ul, .message-content ol {
+                      padding-left: 24px;
+                      margin-bottom: 12px;
+                  }
+                  
+                  .message-content blockquote {
+                      border-left: 3px solid var(--accent);
+                      padding-left: 16px;
+                      color: var(--text-secondary);
                       margin: 12px 0;
                   }
-                  .message-body table {
-                      width: 100%;
-                      border-collapse: collapse;
-                      margin: 12px 0;
-                  }
-                  .message-body th, .message-body td {
-                      border: 1px solid var(--claude-border);
-                      padding: 8px 12px;
-                      text-align: left;
-                  }
-                  .message-body th {
-                      background: var(--claude-sidebar);
-                  }
-
-                  .input-area-wrapper {
+                  
+                  /* Input Area */
+                  .input-area {
                       position: absolute;
                       bottom: 0;
                       left: 0;
-                      width: 100%;
-                      background: linear-gradient(180deg, rgba(253,251,247,0) 0%, var(--claude-bg) 40%);
-                      padding: 20px 24px 28px 24px;
-                      display: flex;
-                      justify-content: center;
+                      right: 0;
+                      background: linear-gradient(180deg, transparent, var(--bg-primary) 30%);
+                      padding: 20px 24px 24px 24px;
                   }
-                  .input-box {
+                  
+                  .input-wrapper {
                       max-width: 768px;
-                      width: 100%;
-                      background: var(--claude-input-bg);
-                      border: 1px solid var(--claude-border);
+                      margin: 0 auto;
+                      background: var(--bg-card);
+                      border: 1px solid var(--border-color);
                       border-radius: 12px;
-                      box-shadow: 0 4px 20px rgba(0,0,0,0.05);
+                      padding: 12px 16px;
                       display: flex;
                       align-items: flex-end;
-                      padding: 12px 16px;
                       gap: 12px;
+                      transition: border-color 0.3s ease;
                   }
-                  .input-box textarea {
+                  
+                  .input-wrapper:focus-within {
+                      border-color: var(--accent);
+                      box-shadow: 0 0 30px var(--accent-glow);
+                  }
+                  
+                  .input-wrapper textarea {
                       flex: 1;
                       background: transparent;
                       border: none;
-                      color: var(--claude-text);
+                      color: var(--text-primary);
                       font-family: inherit;
                       font-size: 15px;
                       resize: none;
@@ -424,99 +463,153 @@ jobs:
                       min-height: 24px;
                       line-height: 24px;
                   }
-                  .input-box textarea::placeholder {
-                      color: #a8a29e;
+                  
+                  .input-wrapper textarea::placeholder {
+                      color: var(--text-secondary);
                   }
+                  
                   .send-btn {
-                      background: var(--claude-accent);
+                      background: var(--accent);
                       border: none;
                       border-radius: 8px;
-                      width: 36px;
-                      height: 36px;
+                      width: 40px;
+                      height: 40px;
                       display: flex;
                       align-items: center;
                       justify-content: center;
                       color: white;
                       cursor: pointer;
-                      transition: opacity 0.2s, transform 0.1s;
+                      transition: all 0.3s ease;
                       flex-shrink: 0;
+                      font-size: 18px;
                   }
-                  .send-btn:hover {
-                      opacity: 0.9;
+                  
+                  .send-btn:hover:not(:disabled) {
+                      background: var(--accent-hover);
+                      transform: scale(1.05);
+                      box-shadow: 0 4px 20px var(--accent-glow);
                   }
-                  .send-btn:active {
-                      transform: scale(0.95);
-                  }
+                  
                   .send-btn:disabled {
-                      opacity: 0.3;
+                      opacity: 0.4;
                       cursor: not-allowed;
                   }
-                  .loading-dots::after {
-                      content: '...';
-                      animation: dots 1.5s steps(4, end) infinite;
-                  }
-                  @keyframes dots {
-                      0% { content: ''; }
-                      25% { content: '.'; }
-                      50% { content: '..'; }
-                      75% { content: '...'; }
-                  }
-                  .settings-group {
+                  
+                  .typing-indicator {
                       display: flex;
-                      flex-direction: column;
-                      gap: 10px;
-                      font-size: 13px;
-                      color: var(--claude-text-secondary);
-                      margin-top: 10px;
+                      gap: 4px;
+                      padding: 4px 0;
                   }
-                  .settings-group label {
-                      display: flex;
-                      justify-content: space-between;
-                      align-items: center;
+                  
+                  .typing-dot {
+                      width: 6px;
+                      height: 6px;
+                      border-radius: 50%;
+                      background: var(--text-secondary);
+                      animation: typingBounce 1.4s infinite;
                   }
-                  .settings-group input[type="range"] {
-                      width: 130px;
-                      accent-color: var(--claude-accent);
+                  
+                  .typing-dot:nth-child(2) { animation-delay: 0.2s; }
+                  .typing-dot:nth-child(3) { animation-delay: 0.4s; }
+                  
+                  @keyframes typingBounce {
+                      0%, 60%, 100% { transform: translateY(0); }
+                      30% { transform: translateY(-6px); }
+                  }
+                  
+                  /* Scrollbar */
+                  .chat-container::-webkit-scrollbar {
+                      width: 4px;
+                  }
+                  
+                  .chat-container::-webkit-scrollbar-track {
+                      background: transparent;
+                  }
+                  
+                  .chat-container::-webkit-scrollbar-thumb {
+                      background: var(--border-color);
+                      border-radius: 2px;
+                  }
+                  
+                  .chat-container::-webkit-scrollbar-thumb:hover {
+                      background: var(--accent);
+                  }
+                  
+                  /* Mobile Responsive */
+                  @media (max-width: 768px) {
+                      .sidebar {
+                          display: none;
+                      }
+                      
+                      .chat-container {
+                          padding: 12px 16px 140px 16px;
+                      }
+                      
+                      .input-area {
+                          padding: 12px 16px 16px 16px;
+                      }
                   }
               </style>
           </head>
           <body>
+              <!-- Sidebar -->
               <div class="sidebar">
+                  <div class="sidebar-header">
+                      <h1>🦙 Ollama</h1>
+                  </div>
+                  
                   <button class="new-chat-btn" onclick="clearChat()">
-                      <span>＋</span> Start New Chat
+                      ✨ New Chat
                   </button>
+                  
                   <div class="settings-group">
-                      <label>Temperature: <span id="tempVal">0.7</span></label>
+                      <label>
+                          Temperature
+                          <span id="tempValue">0.7</span>
+                      </label>
                       <input type="range" id="temperature" min="0" max="2" step="0.1" value="0.7">
-                      <label>Max Tokens: <span id="tokenVal">2048</span></label>
+                  </div>
+                  
+                  <div class="settings-group">
+                      <label>
+                          Max Tokens
+                          <span id="tokenValue">2048</span>
+                      </label>
                       <input type="range" id="maxTokens" min="128" max="4096" step="128" value="2048">
                   </div>
+                  
                   <div class="sidebar-footer">
-                      <span class="model-tag">📦 {{ model_name }}</span>
-                      <span id="statusIndicator">🟢 Ollama Ready</span>
-                      <span id="tokenCounter">Tokens consumed: 0</span>
-                  </div>
-              </div>
-
-              <div class="main-content">
-                  <div class="chat-container" id="chatContainer">
-                      <div class="message-row assistant">
-                          <div class="message-inner">
-                              <div class="avatar assistant">✨</div>
-                              <div class="message-body" id="welcomeMsg"></div>
-                          </div>
+                      <div class="model-tag">📦 {{ model_name }}</div>
+                      <div class="status-indicator">
+                          <span class="status-dot"></span>
+                          <span>Ready</span>
+                      </div>
+                      <div style="font-size:12px;color:var(--text-secondary);margin-top:8px;">
+                          Tokens: <span id="tokenCounter">0</span>
                       </div>
                   </div>
-
-                  <div class="input-area-wrapper">
-                      <div class="input-box">
-                          <textarea id="userInput" placeholder="Reply to Claude..." rows="1"></textarea>
+              </div>
+              
+              <!-- Main Content -->
+              <div class="main-content">
+                  <div class="chat-container" id="chatContainer">
+                      <!-- Welcome Message -->
+                      <div class="message">
+                          <div class="message-avatar assistant">🦙</div>
+                          <div class="message-content" id="welcomeMessage"></div>
+                      </div>
+                  </div>
+                  
+                  <div class="input-area">
+                      <div class="input-wrapper">
+                          <textarea id="userInput" placeholder="Type your message..." rows="1"></textarea>
                           <button class="send-btn" id="sendButton" onclick="sendMessage()">↑</button>
                       </div>
                   </div>
               </div>
-
+              
               <script>
+                  // Configure marked
                   marked.setOptions({
                       highlight: function(code, lang) {
                           if (lang && hljs.getLanguage(lang)) {
@@ -524,112 +617,154 @@ jobs:
                           }
                           return hljs.highlightAuto(code).value;
                       },
-                      breaks: true
+                      breaks: true,
+                      gfm: true
                   });
-
-                  document.getElementById('welcomeMsg').innerHTML = marked.parse("Hello! I am **{{ model_name }}** running locally. How can I help you today?");
-
+                  
+                  // Welcome message
+                  document.getElementById('welcomeMessage').innerHTML = marked.parse(
+                      "Hello! I'm **{{ model_name }}** running locally. How can I help you today?"
+                  );
+                  
+                  // DOM references
                   const chatContainer = document.getElementById('chatContainer');
                   const userInput = document.getElementById('userInput');
                   const sendButton = document.getElementById('sendButton');
                   const tokenCounter = document.getElementById('tokenCounter');
+                  
                   let isStreaming = false;
                   let totalTokens = 0;
                   let messageHistory = [];
-
+                  let currentAssistantMessage = null;
+                  
+                  // Auto-resize textarea
                   userInput.addEventListener('input', function() {
                       this.style.height = 'auto';
                       this.style.height = Math.min(this.scrollHeight, 200) + 'px';
                   });
-
+                  
+                  // Enter to send
                   userInput.addEventListener('keydown', function(e) {
                       if (e.key === 'Enter' && !e.shiftKey) {
                           e.preventDefault();
                           sendMessage();
                       }
                   });
-
+                  
+                  // Temperature slider
                   document.getElementById('temperature').addEventListener('input', function() {
-                      document.getElementById('tempVal').textContent = this.value;
+                      document.getElementById('tempValue').textContent = this.value;
                   });
+                  
+                  // Max tokens slider
                   document.getElementById('maxTokens').addEventListener('input', function() {
-                      document.getElementById('tokenVal').textContent = this.value;
+                      document.getElementById('tokenValue').textContent = this.value;
                   });
-
-                  function appendMessage(role, content, isLoading = false) {
-                      const row = document.createElement('div');
-                      row.className = `message-row ${role}`;
+                  
+                  function addMessage(role, content) {
+                      const messageDiv = document.createElement('div');
+                      messageDiv.className = 'message';
                       
-                      const inner = document.createElement('div');
-                      inner.className = 'message-inner';
-
                       const avatar = document.createElement('div');
-                      avatar.className = `avatar ${role}`;
-                      avatar.textContent = role === 'user' ? 'You' : '✨';
-
-                      const body = document.createElement('div');
-                      body.className = 'message-body';
-                      if (isLoading) {
-                          body.innerHTML = marked.parse(content) + '<span class="loading-dots"></span>';
-                      } else {
-                          body.innerHTML = marked.parse(content);
-                      }
-
-                      inner.appendChild(avatar);
-                      inner.appendChild(body);
-                      row.appendChild(inner);
-                      chatContainer.appendChild(row);
+                      avatar.className = `message-avatar ${role}`;
+                      avatar.textContent = role === 'user' ? '👤' : '🦙';
+                      
+                      const contentDiv = document.createElement('div');
+                      contentDiv.className = 'message-content';
+                      contentDiv.innerHTML = marked.parse(content);
+                      
+                      // Highlight code blocks
+                      contentDiv.querySelectorAll('pre code').forEach(block => {
+                          hljs.highlightElement(block);
+                      });
+                      
+                      messageDiv.appendChild(avatar);
+                      messageDiv.appendChild(contentDiv);
+                      chatContainer.appendChild(messageDiv);
+                      
                       chatContainer.scrollTop = chatContainer.scrollHeight;
-                      return body;
+                      return contentDiv;
                   }
-
-                  function updateLastMessage(content, isComplete = false) {
-                      const rows = chatContainer.querySelectorAll('.message-row.assistant');
-                      if (rows.length === 0) return;
-                      const lastRow = rows[rows.length - 1];
-                      const body = lastRow.querySelector('.message-body');
-                      if (body) {
-                          if (isComplete) {
-                              body.innerHTML = marked.parse(content);
-                              body.querySelectorAll('pre code').forEach((block) => {
+                  
+                  function addTypingIndicator() {
+                      const messageDiv = document.createElement('div');
+                      messageDiv.className = 'message';
+                      messageDiv.id = 'typingIndicator';
+                      
+                      const avatar = document.createElement('div');
+                      avatar.className = 'message-avatar assistant';
+                      avatar.textContent = '🦙';
+                      
+                      const contentDiv = document.createElement('div');
+                      contentDiv.className = 'message-content';
+                      contentDiv.innerHTML = `
+                          <div class="typing-indicator">
+                              <span class="typing-dot"></span>
+                              <span class="typing-dot"></span>
+                              <span class="typing-dot"></span>
+                          </div>
+                      `;
+                      
+                      messageDiv.appendChild(avatar);
+                      messageDiv.appendChild(contentDiv);
+                      chatContainer.appendChild(messageDiv);
+                      chatContainer.scrollTop = chatContainer.scrollHeight;
+                  }
+                  
+                  function removeTypingIndicator() {
+                      const indicator = document.getElementById('typingIndicator');
+                      if (indicator) {
+                          indicator.remove();
+                      }
+                  }
+                  
+                  function updateAssistantMessage(content) {
+                      const messages = chatContainer.querySelectorAll('.message');
+                      const lastMessage = messages[messages.length - 1];
+                      if (lastMessage) {
+                          const contentDiv = lastMessage.querySelector('.message-content');
+                          if (contentDiv) {
+                              contentDiv.innerHTML = marked.parse(content);
+                              contentDiv.querySelectorAll('pre code').forEach(block => {
                                   hljs.highlightElement(block);
                               });
-                          } else {
-                              body.innerHTML = marked.parse(content) + '<span class="loading-dots"></span>';
+                              chatContainer.scrollTop = chatContainer.scrollHeight;
                           }
-                          chatContainer.scrollTop = chatContainer.scrollHeight;
                       }
                   }
-
+                  
                   function clearChat() {
-                      const rows = chatContainer.querySelectorAll('.message-row');
-                      for (let i = 1; i < rows.length; i++) {
-                          rows[i].remove();
+                      const messages = chatContainer.querySelectorAll('.message');
+                      for (let i = 1; i < messages.length; i++) {
+                          messages[i].remove();
                       }
                       messageHistory = [];
                       totalTokens = 0;
-                      tokenCounter.textContent = 'Tokens consumed: 0';
+                      tokenCounter.textContent = '0';
                   }
-
+                  
                   async function sendMessage() {
                       if (isStreaming) return;
+                      
                       const text = userInput.value.trim();
                       if (!text) return;
-
-                      appendMessage('user', text);
+                      
+                      // Add user message
+                      addMessage('user', text);
                       messageHistory.push({ role: 'user', content: text });
                       
                       userInput.value = '';
                       userInput.style.height = 'auto';
                       sendButton.disabled = true;
                       isStreaming = true;
-
-                      appendMessage('assistant', 'Thinking', true);
-
+                      
+                      // Show typing indicator
+                      addTypingIndicator();
+                      
                       try {
                           const temperature = parseFloat(document.getElementById('temperature').value);
                           const maxTokens = parseInt(document.getElementById('maxTokens').value);
-
+                          
                           const response = await fetch('/api/chat', {
                               method: 'POST',
                               headers: { 'Content-Type': 'application/json' },
@@ -640,44 +775,67 @@ jobs:
                                   stream: true
                               })
                           });
-
-                          if (!response.ok) throw new Error('Network response error');
-
+                          
+                          if (!response.ok) {
+                              throw new Error(`HTTP ${response.status}`);
+                          }
+                          
+                          // Remove typing indicator
+                          removeTypingIndicator();
+                          
+                          // Add assistant message placeholder
+                          const assistantContent = addMessage('assistant', '');
+                          let fullContent = '';
+                          
                           const reader = response.body.getReader();
                           const decoder = new TextDecoder();
-                          let fullContent = '';
                           let buffer = '';
-
+                          
                           while (true) {
                               const { done, value } = await reader.read();
                               if (done) break;
-
+                              
                               buffer += decoder.decode(value, { stream: true });
                               const lines = buffer.split('\n');
                               buffer = lines.pop() || '';
-
+                              
                               for (const line of lines) {
                                   if (line.startsWith('data: ')) {
-                                      const data = line.slice(6);
+                                      const data = line.slice(6).trim();
                                       if (data === '[DONE]') continue;
+                                      
                                       try {
                                           const parsed = JSON.parse(data);
                                           if (parsed.content) {
                                               fullContent += parsed.content;
-                                              updateLastMessage(fullContent, false);
+                                              assistantContent.innerHTML = marked.parse(fullContent);
+                                              assistantContent.querySelectorAll('pre code').forEach(block => {
+                                                  hljs.highlightElement(block);
+                                              });
+                                              chatContainer.scrollTop = chatContainer.scrollHeight;
                                           }
-                                      } catch (e) {}
+                                      } catch (e) {
+                                          // Ignore parse errors
+                                      }
                                   }
                               }
                           }
-                          updateLastMessage(fullContent, true);
+                          
+                          // Final render
+                          assistantContent.innerHTML = marked.parse(fullContent);
+                          assistantContent.querySelectorAll('pre code').forEach(block => {
+                              hljs.highlightElement(block);
+                          });
+                          
                           messageHistory.push({ role: 'assistant', content: fullContent });
                           totalTokens += Math.ceil(fullContent.length / 4);
-                          tokenCounter.textContent = `Tokens consumed: ${totalTokens}`;
+                          tokenCounter.textContent = totalTokens;
+                          
                       } catch (error) {
-                          updateLastMessage('❌ Error generating response.', true);
+                          removeTypingIndicator();
+                          addMessage('assistant', `❌ Error: ${error.message}`);
                       }
-
+                      
                       sendButton.disabled = false;
                       isStreaming = false;
                       userInput.focus();
@@ -686,18 +844,23 @@ jobs:
           </body>
           </html>
           '''
-
+          
+          # Routes
           @app.get("/", response_class=HTMLResponse)
           async def root():
-              return HTML_TEMPLATE.replace("{{ model_name }}", MODEL_NAME).replace("{{ context_size }}", str(CONTEXT_SIZE))
-
+              return HTML_TEMPLATE.replace("{{ model_name }}", MODEL_NAME)
+          
           @app.post("/api/chat")
           async def chat(request: ChatRequest):
               try:
+                  logger.info(f"Chat request: {len(request.messages)} messages")
+                  
+                  # Convert messages
                   ollama_messages = [{"role": m.role, "content": m.content} for m in request.messages]
-                  async def generate():
+                  
+                  async def generate() -> AsyncGenerator[str, None]:
                       try:
-                          async with httpx.AsyncClient(timeout=120) as client:
+                          async with httpx.AsyncClient(timeout=httpx.Timeout(120.0)) as client:
                               async with client.stream(
                                   "POST",
                                   f"{OLLAMA_HOST}/api/chat",
@@ -712,27 +875,54 @@ jobs:
                                       }
                                   }
                               ) as response:
+                                  if response.status_code != 200:
+                                      error_text = await response.aread()
+                                      yield f"data: {json.dumps({'error': f'Ollama error: {response.status_code}'})}\n\n"
+                                      return
+                                  
                                   async for chunk in response.aiter_bytes():
                                       try:
-                                          data = chunk.decode('utf-8').strip()
-                                          if data:
-                                              for line in data.split('\n'):
-                                                  if line.strip():
-                                                      json_data = json.loads(line)
-                                                      if "message" in json_data and "content" in json_data["message"]:
-                                                          yield f"data: {json.dumps({'content': json_data['message']['content']})}\n\n"
-                                      except:
+                                          text = chunk.decode('utf-8')
+                                          for line in text.split('\n'):
+                                              if line.strip():
+                                                  data = json.loads(line)
+                                                  if "message" in data and "content" in data["message"]:
+                                                      content = data["message"]["content"]
+                                                      yield f"data: {json.dumps({'content': content})}\n\n"
+                                      except Exception as e:
+                                          logger.warning(f"Chunk parse error: {e}")
                                           continue
+                                          
+                      except httpx.TimeoutException:
+                          yield f"data: {json.dumps({'error': 'Request timeout'})}\n\n"
                       except Exception as e:
+                          logger.error(f"Generation error: {e}")
                           yield f"data: {json.dumps({'error': str(e)})}\n\n"
+                      
                       yield "data: [DONE]\n\n"
-
-                  return StreamingResponse(generate(), media_type="text/event-stream")
+                  
+                  return StreamingResponse(
+                      generate(),
+                      media_type="text/event-stream",
+                      headers={
+                          "Cache-Control": "no-cache",
+                          "Connection": "keep-alive",
+                          "X-Accel-Buffering": "no"
+                      }
+                  )
+                  
               except Exception as e:
+                  logger.error(f"Chat error: {e}")
                   raise HTTPException(status_code=500, detail=str(e))
-
+          
           if __name__ == "__main__":
-              uvicorn.run(app, host="0.0.0.0", port=PORT, log_level="info")
+              uvicorn.run(
+                  app,
+                  host="0.0.0.0",
+                  port=PORT,
+                  log_level="info",
+                  access_log=False
+              )
           EOF
           
           echo "✅ Server script created!"
@@ -740,17 +930,20 @@ jobs:
       - name: 🔧 Start Web Server
         run: |
           echo "──────────────────────────────────────────"
-          echo " 🌐  Starting Web UI server"
+          echo " 🌐 Starting Web UI server"
           echo "──────────────────────────────────────────"
           
           export MODEL_NAME="${{ github.event.inputs.model }}"
           export CONTEXT_SIZE="${{ github.event.inputs.context_size }}"
           export PORT="${{ github.event.inputs.port }}"
           
-          python ollama_server.py &
+          # Start server
+          python app.py &
+          SERVER_PID=$!
           
-          echo "⏳ Waiting for web server to start..."
-          for i in {1..15}; do
+          # Wait for server
+          echo "⏳ Waiting for web server..."
+          for i in {1..20}; do
             if curl -s http://localhost:${{ github.event.inputs.port }} > /dev/null 2>&1; then
               echo "✅ Web UI is ready!"
               break
@@ -761,7 +954,7 @@ jobs:
       - name: 📦 Install Cloudflared
         run: |
           echo "──────────────────────────────────────────"
-          echo " 📦  Installing Cloudflared"
+          echo " 📦 Installing Cloudflared"
           echo "──────────────────────────────────────────"
           
           curl -L -s https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o cloudflared
@@ -773,14 +966,16 @@ jobs:
         id: tunnel
         run: |
           echo "──────────────────────────────────────────"
-          echo " 🌐  Creating Cloudflare tunnel"
+          echo " 🌐 Creating Cloudflare tunnel"
           echo "──────────────────────────────────────────"
           
           PORT="${{ github.event.inputs.port }}"
           
+          # Start tunnel
           cloudflared tunnel --url http://127.0.0.1:$PORT --protocol http2 2>&1 | tee tunnel.log &
           TUNNEL_PID=$!
           
+          # Wait for URL
           echo "⏳ Waiting for tunnel URL..."
           TUNNEL_URL=""
           COUNTER=0
@@ -801,7 +996,7 @@ jobs:
           echo ""
           echo "╔═══════════════════════════════════════════════════════════════════╗"
           echo "║                                                                   ║"
-          echo "║            🎉  L L A M A   I S   R E A D Y !  🎉                  ║"
+          echo "║            🎉  O L L A M A   I S   R E A D Y !  🎉               ║"
           echo "║                                                                   ║"
           echo "╠═══════════════════════════════════════════════════════════════════╣"
           if [ -n "$TUNNEL_URL" ]; then
@@ -811,20 +1006,24 @@ jobs:
           fi
           echo "╚═══════════════════════════════════════════════════════════════════╝"
           
+          # Keep tunnel running
           wait $TUNNEL_PID
 
       - name: Display Final URL
         if: always() && env.TUNNEL_URL != ''
         run: |
+          echo ""
           echo "═══════════════════════════════════════════════════════════════════"
-          echo "  🔗  ACCESS YOUR CLAUDE LLAMA UI:"
+          echo "  🔗  ACCESS YOUR OLLAMA UI:"
           echo "  📌  ${{ env.TUNNEL_URL }}"
           echo "═══════════════════════════════════════════════════════════════════"
+          echo ""
 
       - name: 🧹 Cleanup
         if: always()
         run: |
           echo "🧹 Cleaning up..."
-          pkill -f "cloudflared" 2>/dev/null || true
-          pkill -f "python ollama_server" 2>/dev/null || true
+          pkill -f cloudflared 2>/dev/null || true
+          pkill -f "python app.py" 2>/dev/null || true
+          pkill -f ollama 2>/dev/null || true
           echo "✅ Cleanup complete"
