@@ -15,16 +15,13 @@ on:
           - 'llama3.2:1b'
           - 'tinyllama:1.1b'
           - 'gemma:2b'
-          - 'llama3.2:3b'
-          - 'phi3:mini'
           - 'stablelm2:1.6b'
           - 'granite3-dense:2b'
           - 'deepseek-r1:1.5b'
-          # Mid-Range Performance (3B - 8B)
-          - 'phi3:38b-mini' # fallback placeholder/standard
           - 'qwen2.5:3b'
-          - 'llama3.2:3b-instruct-q4_K_M'
-          - 'minicpm-v:8b'
+          - 'llama3.2:3b'
+          # Mid-Range Performance (3B - 8B)
+          - 'phi3:mini'
           - 'gemma2:2b'
           - 'gemma2:9b'
           - 'mistral:7b'
@@ -36,32 +33,32 @@ on:
           - 'codellama:7b'
           - 'codellama:13b'
           - 'llama3:8b'
+          - 'minicpm-v:8b'
+          - 'solar:10.7b'
+          - 'aya:8b'
           # High-Performance / Large Models (12B - 70B+)
+          - 'mistral-nemo:12b'
           - 'qwen2.5:14b'
+          - 'phi4:14b'
+          - 'deepseek-r1:14b'
+          - 'gemma2:27b'
+          - 'command-r:35b'
           - 'qwen2.5:32b'
-          - 'qwen2.5:72b'
+          - 'deepseek-r1:32b'
+          - 'mixtral:8x7b'
+          - 'glm4:9b'
           - 'llama3.1:70b'
           - 'llama3:70b'
-          - 'mistral-nemo:12b'
-          - 'mixtral:8x7b'
-          - 'mixtral:8x22b'
-          - 'command-r:35b'
-          - 'command-r-plus:104b'
-          - 'deepseek-r1:14b'
-          - 'deepseek-r1:32b'
-          - 'deepseek-r1:70b'
-          - 'deepseek-r1:671b'
-          - 'gemma2:27b'
-          - 'phi4:14b'
           - 'llama3.3:70b'
-          - 'llama-3-70b-instruct'
+          - 'qwen2.5:72b'
+          - 'deepseek-r1:70b'
+          - 'mixtral:8x22b'
+          - 'command-r-plus:104b'
+          - 'deepseek-r1:671b'
           - 'vicuna:7b'
           - 'vicuna:13b'
           - 'wizardlm2:7b'
           - 'wizardlm2:8b'
-          - 'solar:10.7b'
-          - 'aya:8b'
-          - 'glm4:9b'
       port:
         description: '🔌 Web UI port'
         required: false
@@ -86,7 +83,7 @@ jobs:
         run: |
           echo "╔═══════════════════════════════════════════════════════════════════╗"
           echo "║                                                                   ║"
-          echo "║            🦙  L L A M A   W E B   U I   (50 MODELS)              ║"
+          echo "║            🦙  C L A U D E - S T Y L E   L L A M A   U I          ║"
           echo "║                                                                   ║"
           echo "╚═══════════════════════════════════════════════════════════════════╝"
           echo ""
@@ -125,12 +122,11 @@ jobs:
             websockets \
             pydantic
 
-          # Verify installations
           ollama --version || echo "⚠️ Ollama version check"
           python --version
           echo "✅ Dependencies installed!"
 
-      - name: 🚀 Start Ollama Server
+      - name: 🚀 Start Ollama Server First
         run: |
           echo "──────────────────────────────────────────"
           echo " 🚀  Starting Ollama server in background"
@@ -138,7 +134,7 @@ jobs:
           
           ollama serve &
           
-          echo "⏳ Waiting for Ollama to be ready..."
+          echo "⏳ Waiting for Ollama service to be ready..."
           for i in {1..30}; do
             if curl -s http://localhost:11434/api/tags > /dev/null 2>&1; then
               echo "✅ Ollama is ready!"
@@ -157,13 +153,9 @@ jobs:
           
           echo "⏳ This may take 3-15 minutes depending on model size..."
           echo ""
-          
-          # Download the model
           ollama pull "$MODEL"
-          
           echo ""
           echo "✅ Model downloaded successfully!"
-          echo ""
           echo "📊 Installed models:"
           ollama list
 
@@ -172,7 +164,7 @@ jobs:
           cat > ollama_server.py << 'EOF'
           #!/usr/bin/env python3
           """
-          🦙 Ollama Web Server - ChatGPT UI Styling with Full Markdown & Code Highlights
+          🦙 Ollama Web Server - Claude UI Styling with Markdown & Code Highlights
           """
           
           import json
@@ -183,26 +175,21 @@ jobs:
           from typing import Optional, Dict, List, Any
           from fastapi import FastAPI, HTTPException, Request
           from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
-          from fastapi.staticfiles import StaticFiles
           from pydantic import BaseModel
           import uvicorn
           import httpx
           import logging
-          import sys
           import os
-          from datetime import datetime
           
-          # Setup logging
           logging.basicConfig(level=logging.INFO)
           logger = logging.getLogger(__name__)
           
-          # Configuration
           OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
           CONTEXT_SIZE = int(os.getenv("CONTEXT_SIZE", "4096"))
           MODEL_NAME = os.getenv("MODEL_NAME", "qwen2.5:0.5b")
           PORT = int(os.getenv("PORT", "7860"))
           
-          app = FastAPI(title="🦙 Llama ChatGPT UI", description="Local LLM Interface")
+          app = FastAPI(title="Claude Local UI", description="Local LLM Interface")
           
           class ChatMessage(BaseModel):
               role: str
@@ -212,7 +199,7 @@ jobs:
               messages: List[ChatMessage]
               temperature: Optional[float] = 0.7
               max_tokens: Optional[int] = 2048
-              stream: Optional[bool] = False
+              stream: Optional[bool] = True
           
           HTML_TEMPLATE = '''
           <!DOCTYPE html>
@@ -220,23 +207,23 @@ jobs:
           <head>
               <meta charset="UTF-8">
               <meta name="viewport" content="width=device-width, initial-scale=1.0">
-              <title>ChatGPT - Llama Local</title>
-              <!-- Marked.js for Markdown parsing -->
+              <title>Claude - Local LLM</title>
+              <!-- Marked.js for Markdown -->
               <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
               <!-- Highlight.js for Code Highlighting -->
-              <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+              <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
               <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
               <style>
                   :root {
-                      --bg-sidebar: #202123;
-                      --bg-main: #343541;
-                      --bg-input: #40414f;
-                      --text-main: #ececf1;
-                      --text-secondary: #8e8ea0;
-                      --border-color: #4d4d4f;
-                      --user-bubble: #343541;
-                      --ai-bubble: #444654;
-                      --accent-green: #10a37f;
+                      --claude-bg: #fdfbf7;
+                      --claude-sidebar: #f4efe6;
+                      --claude-border: #e6dfd5;
+                      --claude-text: #383735;
+                      --claude-text-secondary: #73716b;
+                      --claude-accent: #cc785c;
+                      --claude-user-bg: #f4efe6;
+                      --claude-assistant-bg: #ffffff;
+                      --claude-input-bg: #ffffff;
                   }
                   * {
                       margin: 0;
@@ -244,59 +231,60 @@ jobs:
                       box-sizing: border-box;
                   }
                   body {
-                      background: var(--bg-main);
-                      color: var(--text-main);
-                      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+                      background: var(--claude-bg);
+                      color: var(--claude-text);
+                      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
                       height: 100vh;
                       display: flex;
                       overflow: hidden;
                   }
                   .sidebar {
-                      width: 260px;
-                      background: var(--bg-sidebar);
+                      width: 280px;
+                      background: var(--claude-sidebar);
+                      border-right: 1px solid var(--claude-border);
                       display: flex;
                       flex-direction: column;
-                      padding: 10px;
-                      border-right: 1px solid var(--border-color);
+                      padding: 16px;
                       flex-shrink: 0;
                   }
                   .new-chat-btn {
                       display: flex;
                       align-items: center;
-                      gap: 12px;
+                      gap: 10px;
                       width: 100%;
-                      padding: 12px;
-                      background: transparent;
-                      border: 1px solid var(--border-color);
-                      border-radius: 6px;
-                      color: var(--text-main);
+                      padding: 10px 14px;
+                      background: #ffffff;
+                      border: 1px solid var(--claude-border);
+                      border-radius: 8px;
+                      color: var(--claude-text);
                       font-size: 14px;
+                      font-weight: 500;
                       cursor: pointer;
-                      text-align: left;
-                      transition: background 0.2s;
-                      margin-bottom: 10px;
+                      box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+                      transition: background 0.2s, border-color 0.2s;
+                      margin-bottom: 20px;
                   }
                   .new-chat-btn:hover {
-                      background: rgba(255, 255, 255, 0.05);
+                      background: #faf8f5;
+                      border-color: #d1c7bc;
                   }
                   .sidebar-footer {
                       margin-top: auto;
-                      border-top: 1px solid var(--border-color);
-                      padding-top: 10px;
+                      border-top: 1px solid var(--claude-border);
+                      padding-top: 14px;
                       font-size: 13px;
-                      color: var(--text-secondary);
+                      color: var(--claude-text-secondary);
                       display: flex;
                       flex-direction: column;
-                      gap: 6px;
+                      gap: 8px;
                   }
                   .model-tag {
-                      background: rgba(16, 163, 127, 0.15);
-                      color: var(--accent-green);
+                      background: rgba(204, 120, 92, 0.12);
+                      color: var(--claude-accent);
                       padding: 4px 8px;
-                      border-radius: 4px;
+                      border-radius: 6px;
                       font-size: 12px;
-                      font-weight: 500;
-                      display: inline-block;
+                      font-weight: 600;
                       width: fit-content;
                   }
                   .main-content {
@@ -305,125 +293,129 @@ jobs:
                       flex-direction: column;
                       height: 100vh;
                       position: relative;
+                      background: var(--claude-bg);
                   }
                   .chat-container {
                       flex: 1;
                       overflow-y: auto;
                       display: flex;
                       flex-direction: column;
-                      padding-bottom: 120px;
+                      padding: 20px 0 140px 0;
+                      scroll-behavior: smooth;
                   }
                   .message-row {
                       width: 100%;
                       display: flex;
                       justify-content: center;
-                      border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+                      padding: 24px 16px;
+                      border-bottom: 1px solid rgba(230, 223, 213, 0.4);
                   }
                   .message-row.user {
-                      background: var(--user-bubble);
+                      background: var(--claude-user-bg);
                   }
                   .message-row.assistant {
-                      background: var(--ai-bubble);
+                      background: var(--claude-assistant-bg);
                   }
-                  .message-content {
+                  .message-inner {
                       max-width: 768px;
                       width: 100%;
-                      padding: 24px 16px;
                       display: flex;
                       gap: 16px;
                       line-height: 1.7;
                       font-size: 15px;
                   }
                   .avatar {
-                      width: 30px;
-                      height: 30px;
-                      border-radius: 2px;
+                      width: 32px;
+                      height: 32px;
+                      border-radius: 50%;
                       display: flex;
                       align-items: center;
                       justify-content: center;
-                      font-size: 16px;
+                      font-size: 15px;
                       flex-shrink: 0;
                   }
-                  .avatar.user { background: #5436da; color: #fff; }
-                  .avatar.assistant { background: var(--accent-green); color: #fff; }
-                  .text-body {
+                  .avatar.user { background: #383735; color: #fff; }
+                  .avatar.assistant { background: var(--claude-accent); color: #fff; }
+                  .message-body {
                       flex: 1;
                       overflow-x: auto;
                   }
                   
-                  /* Markdown Custom Styling */
-                  .text-body p { margin-bottom: 12px; }
-                  .text-body p:last-child { margin-bottom: 0; }
-                  .text-body pre {
+                  /* Markdown Customization for Claude Theme */
+                  .message-body p { margin-bottom: 12px; }
+                  .message-body p:last-child { margin-bottom: 0; }
+                  .message-body pre {
                       background: #1e1e1e;
-                      padding: 12px;
+                      color: #d4d4d4;
+                      padding: 14px;
                       border-radius: 8px;
                       overflow-x: auto;
                       margin: 12px 0;
-                      border: 1px solid var(--border-color);
+                      border: 1px solid #333;
                   }
-                  .text-body code {
+                  .message-body code {
                       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
                       font-size: 13px;
-                      background: rgba(0,0,0,0.2);
-                      padding: 2px 4px;
+                      background: rgba(0,0,0,0.06);
+                      padding: 2px 5px;
                       border-radius: 4px;
                   }
-                  .text-body pre code {
+                  .message-body pre code {
                       background: transparent;
                       padding: 0;
+                      color: inherit;
                   }
-                  .text-body ul, .text-body ol {
-                      padding-left: 20px;
+                  .message-body ul, .message-body ol {
+                      padding-left: 22px;
                       margin-bottom: 12px;
                   }
-                  .text-body blockquote {
-                      border-left: 3px solid var(--accent-green);
-                      padding-left: 10px;
-                      color: var(--text-secondary);
+                  .message-body blockquote {
+                      border-left: 3px solid var(--claude-accent);
+                      padding-left: 12px;
+                      color: var(--claude-text-secondary);
                       margin: 12px 0;
                   }
-                  .text-body table {
+                  .message-body table {
                       width: 100%;
                       border-collapse: collapse;
                       margin: 12px 0;
                   }
-                  .text-body th, .text-body td {
-                      border: 1px solid var(--border-color);
+                  .message-body th, .message-body td {
+                      border: 1px solid var(--claude-border);
                       padding: 8px 12px;
                       text-align: left;
                   }
-                  .text-body th {
-                      background: rgba(255,255,255,0.05);
+                  .message-body th {
+                      background: var(--claude-sidebar);
                   }
 
-                  .input-container {
+                  .input-area-wrapper {
                       position: absolute;
                       bottom: 0;
                       left: 0;
                       width: 100%;
-                      background: linear-gradient(180deg, rgba(53,53,65,0) 0%, var(--bg-main) 50%);
-                      padding: 24px;
+                      background: linear-gradient(180deg, rgba(253,251,247,0) 0%, var(--claude-bg) 40%);
+                      padding: 20px 24px 28px 24px;
                       display: flex;
                       justify-content: center;
                   }
-                  .input-box-wrapper {
+                  .input-box {
                       max-width: 768px;
                       width: 100%;
-                      background: var(--bg-input);
-                      border: 1px solid var(--border-color);
+                      background: var(--claude-input-bg);
+                      border: 1px solid var(--claude-border);
                       border-radius: 12px;
-                      box-shadow: 0 0 15px rgba(0,0,0,0.1);
+                      box-shadow: 0 4px 20px rgba(0,0,0,0.05);
                       display: flex;
                       align-items: flex-end;
-                      padding: 10px 14px;
-                      gap: 10px;
+                      padding: 12px 16px;
+                      gap: 12px;
                   }
-                  .input-box-wrapper textarea {
+                  .input-box textarea {
                       flex: 1;
                       background: transparent;
                       border: none;
-                      color: var(--text-main);
+                      color: var(--claude-text);
                       font-family: inherit;
                       font-size: 15px;
                       resize: none;
@@ -432,19 +424,28 @@ jobs:
                       min-height: 24px;
                       line-height: 24px;
                   }
+                  .input-box textarea::placeholder {
+                      color: #a8a29e;
+                  }
                   .send-btn {
-                      background: var(--accent-green);
+                      background: var(--claude-accent);
                       border: none;
-                      border-radius: 6px;
-                      width: 32px;
-                      height: 32px;
+                      border-radius: 8px;
+                      width: 36px;
+                      height: 36px;
                       display: flex;
                       align-items: center;
                       justify-content: center;
                       color: white;
                       cursor: pointer;
-                      transition: opacity 0.2s;
+                      transition: opacity 0.2s, transform 0.1s;
                       flex-shrink: 0;
+                  }
+                  .send-btn:hover {
+                      opacity: 0.9;
+                  }
+                  .send-btn:active {
+                      transform: scale(0.95);
                   }
                   .send-btn:disabled {
                       opacity: 0.3;
@@ -460,38 +461,39 @@ jobs:
                       50% { content: '..'; }
                       75% { content: '...'; }
                   }
-                  .settings-panel {
-                      padding: 10px 0;
+                  .settings-group {
                       display: flex;
                       flex-direction: column;
-                      gap: 8px;
+                      gap: 10px;
                       font-size: 13px;
-                      color: var(--text-secondary);
+                      color: var(--claude-text-secondary);
+                      margin-top: 10px;
                   }
-                  .settings-panel label {
+                  .settings-group label {
                       display: flex;
                       justify-content: space-between;
                       align-items: center;
                   }
-                  .settings-panel input[type="range"] {
-                      width: 120px;
+                  .settings-group input[type="range"] {
+                      width: 130px;
+                      accent-color: var(--claude-accent);
                   }
               </style>
           </head>
           <body>
               <div class="sidebar">
                   <button class="new-chat-btn" onclick="clearChat()">
-                      <span>+</span> New chat
+                      <span>＋</span> Start New Chat
                   </button>
-                  <div class="settings-panel">
-                      <label>Temp: <span id="tempVal">0.7</span></label>
+                  <div class="settings-group">
+                      <label>Temperature: <span id="tempVal">0.7</span></label>
                       <input type="range" id="temperature" min="0" max="2" step="0.1" value="0.7">
-                      <label>Tokens: <span id="tokenVal">2048</span></label>
+                      <label>Max Tokens: <span id="tokenVal">2048</span></label>
                       <input type="range" id="maxTokens" min="128" max="4096" step="128" value="2048">
                   </div>
                   <div class="sidebar-footer">
                       <span class="model-tag">📦 {{ model_name }}</span>
-                      <span id="statusIndicator">🟢 Ollama Online</span>
+                      <span id="statusIndicator">🟢 Ollama Ready</span>
                       <span id="tokenCounter">Tokens consumed: 0</span>
                   </div>
               </div>
@@ -499,17 +501,17 @@ jobs:
               <div class="main-content">
                   <div class="chat-container" id="chatContainer">
                       <div class="message-row assistant">
-                          <div class="message-content">
-                              <div class="avatar assistant">🦙</div>
-                              <div class="text-body" id="welcomeMsg"></div>
+                          <div class="message-inner">
+                              <div class="avatar assistant">✨</div>
+                              <div class="message-body" id="welcomeMsg"></div>
                           </div>
                       </div>
                   </div>
 
-                  <div class="input-container">
-                      <div class="input-box-wrapper">
-                          <textarea id="userInput" placeholder="Send a message..." rows="1"></textarea>
-                          <button class="send-btn" id="sendButton" onclick="sendMessage()">⬆</button>
+                  <div class="input-area-wrapper">
+                      <div class="input-box">
+                          <textarea id="userInput" placeholder="Reply to Claude..." rows="1"></textarea>
+                          <button class="send-btn" id="sendButton" onclick="sendMessage()">↑</button>
                       </div>
                   </div>
               </div>
@@ -525,7 +527,7 @@ jobs:
                       breaks: true
                   });
 
-                  document.getElementById('welcomeMsg').innerHTML = marked.parse("Hello! I'm running **{{ model_name }}** locally through your interface. How can I help you today?");
+                  document.getElementById('welcomeMsg').innerHTML = marked.parse("Hello! I am **{{ model_name }}** running locally. How can I help you today?");
 
                   const chatContainer = document.getElementById('chatContainer');
                   const userInput = document.getElementById('userInput');
@@ -533,6 +535,7 @@ jobs:
                   const tokenCounter = document.getElementById('tokenCounter');
                   let isStreaming = false;
                   let totalTokens = 0;
+                  let messageHistory = [];
 
                   userInput.addEventListener('input', function() {
                       this.style.height = 'auto';
@@ -557,42 +560,42 @@ jobs:
                       const row = document.createElement('div');
                       row.className = `message-row ${role}`;
                       
-                      const msgContent = document.createElement('div');
-                      msgContent.className = 'message-content';
+                      const inner = document.createElement('div');
+                      inner.className = 'message-inner';
 
                       const avatar = document.createElement('div');
                       avatar.className = `avatar ${role}`;
-                      avatar.textContent = role === 'user' ? '👤' : '🦙';
+                      avatar.textContent = role === 'user' ? 'You' : '✨';
 
-                      const textBody = document.createElement('div');
-                      textBody.className = 'text-body';
+                      const body = document.createElement('div');
+                      body.className = 'message-body';
                       if (isLoading) {
-                          textBody.innerHTML = marked.parse(content) + '<span class="loading-dots"></span>';
+                          body.innerHTML = marked.parse(content) + '<span class="loading-dots"></span>';
                       } else {
-                          textBody.innerHTML = marked.parse(content);
+                          body.innerHTML = marked.parse(content);
                       }
 
-                      msgContent.appendChild(avatar);
-                      msgContent.appendChild(textBody);
-                      row.appendChild(msgContent);
+                      inner.appendChild(avatar);
+                      inner.appendChild(body);
+                      row.appendChild(inner);
                       chatContainer.appendChild(row);
                       chatContainer.scrollTop = chatContainer.scrollHeight;
-                      return textBody;
+                      return body;
                   }
 
                   function updateLastMessage(content, isComplete = false) {
                       const rows = chatContainer.querySelectorAll('.message-row.assistant');
                       if (rows.length === 0) return;
                       const lastRow = rows[rows.length - 1];
-                      const textBody = lastRow.querySelector('.text-body');
-                      if (textBody) {
+                      const body = lastRow.querySelector('.message-body');
+                      if (body) {
                           if (isComplete) {
-                              textBody.innerHTML = marked.parse(content);
-                              textBody.querySelectorAll('pre code').forEach((block) => {
+                              body.innerHTML = marked.parse(content);
+                              body.querySelectorAll('pre code').forEach((block) => {
                                   hljs.highlightElement(block);
                               });
                           } else {
-                              textBody.innerHTML = marked.parse(content) + '<span class="loading-dots"></span>';
+                              body.innerHTML = marked.parse(content) + '<span class="loading-dots"></span>';
                           }
                           chatContainer.scrollTop = chatContainer.scrollHeight;
                       }
@@ -603,6 +606,7 @@ jobs:
                       for (let i = 1; i < rows.length; i++) {
                           rows[i].remove();
                       }
+                      messageHistory = [];
                       totalTokens = 0;
                       tokenCounter.textContent = 'Tokens consumed: 0';
                   }
@@ -613,6 +617,8 @@ jobs:
                       if (!text) return;
 
                       appendMessage('user', text);
+                      messageHistory.push({ role: 'user', content: text });
+                      
                       userInput.value = '';
                       userInput.style.height = 'auto';
                       sendButton.disabled = true;
@@ -628,14 +634,14 @@ jobs:
                               method: 'POST',
                               headers: { 'Content-Type': 'application/json' },
                               body: JSON.stringify({
-                                  messages: [{ role: 'user', content: text }],
+                                  messages: messageHistory,
                                   temperature: temperature,
                                   max_tokens: maxTokens,
                                   stream: true
                               })
                           });
 
-                          if (!response.ok) throw new Error('Network response was not ok');
+                          if (!response.ok) throw new Error('Network response error');
 
                           const reader = response.body.getReader();
                           const decoder = new TextDecoder();
@@ -665,10 +671,11 @@ jobs:
                               }
                           }
                           updateLastMessage(fullContent, true);
+                          messageHistory.push({ role: 'assistant', content: fullContent });
                           totalTokens += Math.ceil(fullContent.length / 4);
                           tokenCounter.textContent = `Tokens consumed: ${totalTokens}`;
                       } catch (error) {
-                          updateLastMessage('❌ Error processing request.', true);
+                          updateLastMessage('❌ Error generating response.', true);
                       }
 
                       sendButton.disabled = false;
@@ -683,17 +690,6 @@ jobs:
           @app.get("/", response_class=HTMLResponse)
           async def root():
               return HTML_TEMPLATE.replace("{{ model_name }}", MODEL_NAME).replace("{{ context_size }}", str(CONTEXT_SIZE))
-
-          @app.get("/api/status")
-          async def status():
-              try:
-                  async with httpx.AsyncClient(timeout=3) as client:
-                      resp = await client.get(f"{OLLAMA_HOST}/api/tags")
-                      if resp.status_code == 200:
-                          return {"status": "online"}
-              except:
-                  pass
-              return {"status": "offline"}
 
           @app.post("/api/chat")
           async def chat(request: ChatRequest):
@@ -821,7 +817,7 @@ jobs:
         if: always() && env.TUNNEL_URL != ''
         run: |
           echo "═══════════════════════════════════════════════════════════════════"
-          echo "  🔗  ACCESS YOUR CHATGPT LLAMA UI:"
+          echo "  🔗  ACCESS YOUR CLAUDE LLAMA UI:"
           echo "  📌  ${{ env.TUNNEL_URL }}"
           echo "═══════════════════════════════════════════════════════════════════"
 
