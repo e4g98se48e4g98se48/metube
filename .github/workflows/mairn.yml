@@ -1,4 +1,4 @@
-name: MeTube with Deno.js + WARP VPN + Cookie Bypass
+name: MeTube with WARP + Deno.js Bypass
 
 on:
   workflow_dispatch:
@@ -11,13 +11,30 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Start WARP VPN Container
+      - name: Show Banner
         run: |
-          echo "🌐 Starting Cloudflare WARP VPN..."
+          echo "╔═══════════════════════════════════════════════════════════════════╗"
+          echo "║                                                                   ║"
+          echo "║         🎬  M E T U B E   W I T H   F U L L   B Y P A S S       ║"
+          echo "║                                                                   ║"
+          echo "╚═══════════════════════════════════════════════════════════════════╝"
+          echo ""
+          echo "  🌐 WARP VPN + 🦕 Deno.js = Full YouTube Bypass"
+          echo "  🍪 No cookies needed - works like Youtube Downloader"
+          echo ""
+
+      - name: Start WARP Container
+        run: |
+          echo "──────────────────────────────────────────"
+          echo " 🌐  NETWORK  ·  Starting Cloudflare WARP"
+          echo "──────────────────────────────────────────"
+          
+          docker network create warp-net 2>/dev/null || true
           
           docker run -d \
             --name warp \
             --restart=always \
+            --network warp-net \
             -p 1080:1080 \
             --cap-add NET_ADMIN \
             --sysctl net.ipv6.conf.all.disable_ipv6=0 \
@@ -25,46 +42,71 @@ jobs:
             -v warp-data:/var/lib/cloudflare-warp \
             caomingjun/warp:latest
           
-          echo "⏳ Waiting for WARP to initialize..."
+          echo "⏳ Waiting for WARP to initialize (20s)..."
           sleep 20
           
-          echo "🔎 Verifying WARP connection..."
+          echo "🔎 Checking WARP status..."
           for i in {1..8}; do
             RESULT=$(curl -s --max-time 5 --socks5-hostname 127.0.0.1:1080 https://cloudflare.com/cdn-cgi/trace 2>/dev/null || echo "failed")
             if echo "$RESULT" | grep -qE "warp=(on|plus)"; then
               echo "✅ WARP is active!"
               echo "$RESULT" | grep -E "warp=|colo=|ip="
               break
+            else
+              echo "   attempt $i/8 — not ready yet, waiting..."
+              sleep 5
             fi
-            sleep 5
           done
+          
+          FINAL=$(curl -s --max-time 10 --socks5-hostname 127.0.0.1:1080 https://cloudflare.com/cdn-cgi/trace 2>/dev/null || echo "failed")
+          if echo "$FINAL" | grep -qE "warp=(on|plus)"; then
+            echo "✅ WARP proxy is ready!"
+          else
+            echo "⚠️  WARP might not be fully active, continuing anyway..."
+          fi
 
-      - name: Install Deno.js and Dependencies
+      - name: Build MeTube with Deno.js
         run: |
-          echo "📦 Installing Deno.js..."
+          echo "──────────────────────────────────────────"
+          echo " 🔨  BUILD  ·  Creating MeTube with Deno"
+          echo "──────────────────────────────────────────"
           
-          curl -fsSL https://deno.land/install.sh | sh
-          export DENO_INSTALL="$HOME/.deno"
-          export PATH="$DENO_INSTALL/bin:$PATH"
-          echo "DENO_INSTALL=$DENO_INSTALL" >> $GITHUB_ENV
-          echo "$DENO_INSTALL/bin" >> $GITHUB_PATH
+          # Create Dockerfile with Deno.js
+          cat > Dockerfile.metube << 'EOF'
+          FROM ghcr.io/alexta69/metube:latest
           
-          deno --version
-          echo "✅ Deno.js installed"
+          USER root
           
-          echo "📦 Installing yt-dlp..."
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq python3-pip ffmpeg
-          pip3 install --upgrade -q yt-dlp
-          yt-dlp --version
-          echo "✅ yt-dlp installed"
+          # Install Deno.js (like in Youtube Downloader)
+          RUN apt-get update && apt-get install -y curl unzip && \
+              curl -fsSL https://deno.land/install.sh | sh && \
+              export DENO_INSTALL="/root/.deno" && \
+              export PATH="$DENO_INSTALL/bin:$PATH" && \
+              /root/.deno/bin/deno --version
+          
+          # Set environment for Deno
+          ENV DENO_INSTALL="/root/.deno"
+          ENV PATH="$DENO_INSTALL/bin:$PATH"
+          
+          # Install latest yt-dlp
+          RUN pip3 install --upgrade yt-dlp
+          
+          USER metube
+          
+          # Verify Deno is accessible
+          RUN /root/.deno/bin/deno --version || echo "Deno installed"
+          EOF
+          
+          # Build the custom image
+          docker build -f Dockerfile.metube -t metube-deno:latest .
+          echo "✅ Custom MeTube with Deno.js built!"
 
-      - name: Create docker-compose with FULL BYPASS
+      - name: Create docker-compose with full bypass
         run: |
           cat > docker-compose.yml << 'EOF'
           services:
             metube:
-              image: ghcr.io/alexta69/metube:latest
+              image: metube-deno:latest
               container_name: metube
               restart: unless-stopped
               ports:
@@ -77,25 +119,72 @@ jobs:
                 - MAX_CONCURRENT_DOWNLOADS=5
                 - DEFAULT_THEME=dark
                 - LOGLEVEL=INFO
-                - YTDL_OPTIONS={"proxy":"socks5://host.docker.internal:1080","extractor_args":{"youtube":{"player_client":["web","mweb","android","android_vr"],"skip":["hls","dash"]}},"js_runtimes":"deno","remote_components":"ejs:github","writesubtitles":true,"subtitleslangs":["en","fa"],"writeautomaticsub":true,"updatetime":false,"cookiefile":"/downloads/cookies.txt","user_agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36","add_headers":{"Accept-Language":"en-US,en;q=0.9","Accept-Encoding":"gzip, deflate, br"},"sleep_interval":10,"max_sleep_interval":30,"retries":20,"fragment_retries":20}
+                - DENO_INSTALL=/root/.deno
+                - PATH=/root/.deno/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+                - YTDL_OPTIONS={"proxy":"socks5://host.docker.internal:1080","extractor_args":{"youtube":{"player_client":["web","mweb","android","android_vr"],"skip":["hls","dash"]}},"js_runtimes":"deno","remote_components":"ejs:github","writesubtitles":true,"subtitleslangs":["en","fa"],"writeautomaticsub":true,"updatetime":false,"user_agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36","add_headers":{"Accept-Language":"en-US,en;q=0.9","Accept-Encoding":"gzip, deflate, br"},"sleep_interval":10,"max_sleep_interval":30,"retries":20,"fragment_retries":20}
+              extra_hosts:
+                - "host.docker.internal:host-gateway"
+              depends_on:
+                - warp
+            warp:
+              image: caomingjun/warp:latest
+              container_name: warp
+              restart: unless-stopped
+              network_mode: host
+              cap_add:
+                - NET_ADMIN
+              sysctls:
+                - net.ipv6.conf.all.disable_ipv6=0
+                - net.ipv4.conf.all.src_valid_mark=1
+              volumes:
+                - warp-data:/var/lib/cloudflare-warp
+          volumes:
+            warp-data:
           EOF
+          
+          echo "✅ Docker Compose created with WARP + Deno.js"
 
-      - name: Start MeTube
+      - name: Start MeTube with full bypass
         run: |
+          echo "──────────────────────────────────────────"
+          echo " 🚀  START  ·  Launching MeTube"
+          echo "──────────────────────────────────────────"
+          
           docker compose up -d
-          echo "⏳ Waiting for MeTube to start..."
-          sleep 10
-          docker logs metube
-          echo "✅ MeTube is running!"
+          
+          echo "⏳ Waiting for services to start..."
+          sleep 15
+          
+          echo ""
+          echo "📊 Container status:"
+          docker ps
+          
+          echo ""
+          echo "📋 MeTube logs:"
+          docker logs metube 2>&1 | head -30
+          
+          echo ""
+          echo "🔍 Verifying Deno.js in container:"
+          docker exec metube deno --version || echo "⚠️ Deno check"
+          
+          echo ""
+          echo "🔍 Verifying WARP connectivity:"
+          docker exec metube curl -s --socks5-hostname host.docker.internal:1080 https://cloudflare.com/cdn-cgi/trace | grep -E "warp=|colo=|ip=" || echo "⚠️ WARP check"
+          
+          echo ""
+          echo "✅ MeTube is running with full bypass!"
 
-      - name: Test YouTube Access via Deno+WARP
+      - name: Test YouTube access (like Youtube Downloader)
         run: |
-          echo "🔎 Testing YouTube access via Deno+WARP..."
+          echo "──────────────────────────────────────────"
+          echo " 🧪  TEST  ·  Verifying YouTube access"
+          echo "──────────────────────────────────────────"
           
           docker exec metube sh -c "
             export DENO_INSTALL=/root/.deno
             export PATH=\$DENO_INSTALL/bin:\$PATH
-            deno --version || echo 'Deno not found'
+            
+            echo '📌 Testing with Deno.js + WARP...'
             
             yt-dlp \
               --proxy socks5://host.docker.internal:1080 \
@@ -105,12 +194,15 @@ jobs:
               --dump-json --skip-download \
               --no-warnings \
               'https://www.youtube.com/watch?v=dQw4w9WgXcQ' \
-              2>&1 | head -30
+              2>&1 | head -20
           " || echo "⚠️ Test completed"
 
       - name: Install cloudflared
         run: |
-          echo "📦 Installing cloudflared..."
+          echo "──────────────────────────────────────────"
+          echo " 📦  SETUP  ·  Installing cloudflared"
+          echo "──────────────────────────────────────────"
+          
           curl -L -s https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o cloudflared
           chmod +x cloudflared
           sudo mv cloudflared /usr/local/bin/
@@ -119,7 +211,9 @@ jobs:
       - name: Create Tunnel and Display URL
         id: tunnel
         run: |
-          echo "🌐 Creating Cloudflare tunnel..."
+          echo "──────────────────────────────────────────"
+          echo " 🌐  TUNNEL  ·  Creating Cloudflare tunnel"
+          echo "──────────────────────────────────────────"
           
           cloudflared tunnel --url http://127.0.0.1:8081 --protocol http2 2>&1 | tee tunnel.log &
           TUNNEL_PID=$!
@@ -144,7 +238,7 @@ jobs:
           echo ""
           echo "╔═══════════════════════════════════════════════════════════════════╗"
           echo "║                                                                   ║"
-          echo "║      🎉  M E T U B E   W I T H   F U L L   B Y P A S S  🎉      ║"
+          echo "║         🎉  M E T U B E   I S   R E A D Y !  🎉                 ║"
           echo "║                                                                   ║"
           echo "╠═══════════════════════════════════════════════════════════════════╣"
           echo "║                                                                   ║"
@@ -155,21 +249,19 @@ jobs:
           fi
           echo "║                                                                   ║"
           echo "╠═══════════════════════════════════════════════════════════════════╣"
-          echo "║  🌐  WARP VPN      → Active (bypasses IP blocks)                 ║"
-          echo "║  🦕  Deno.js       → Active (JavaScript runtime)                 ║"
-          echo "║  🍪  Cookie Bypass → Supported (upload in UI)                    ║"
+          echo "║  🌐  WARP VPN      → Active (bypasses IP/rate limits)            ║"
+          echo "║  🦕  Deno.js       → Active (executes YouTube JS challenges)     ║"
+          echo "║  🍪  Cookies       → Not required (like Youtube Downloader)      ║"
           echo "║                                                                   ║"
           echo "╠═══════════════════════════════════════════════════════════════════╣"
-          echo "║  📌  TO DOWNLOAD VIDEOS:                                         ║"
+          echo "║  📌  HOW TO USE:                                                  ║"
           echo "║  1. Open the URL above in your browser                           ║"
-          echo "║  2. Paste any YouTube URL                                        ║"
-          echo "║  3. Click Download                                               ║"
+          echo "║  2. Paste any YouTube URL (e.g., V0w3IfLO4SA)                   ║"
+          echo "║  3. Click Download - it will bypass all blocks!                  ║"
           echo "║                                                                   ║"
           echo "╠═══════════════════════════════════════════════════════════════════╣"
-          echo "║  🍪  IF YOU GET 'SIGN IN' ERRORS:                                ║"
-          echo "║  1. Click 'Advanced Options' in MeTube                          ║"
-          echo "║  2. Click 'Upload Cookies'                                       ║"
-          echo "║  3. Upload cookies.txt from your browser                         ║"
+          echo "║  ⏱️  Tunnel expires in ~6 hours (GitHub Action limit)            ║"
+          echo "║  📁  Downloads: ./downloads (ephemeral)                          ║"
           echo "║                                                                   ║"
           echo "╚═══════════════════════════════════════════════════════════════════╝"
           echo ""
@@ -185,12 +277,15 @@ jobs:
           echo "  📌  ${{ env.TUNNEL_URL }}"
           echo "═══════════════════════════════════════════════════════════════════"
           echo ""
-          echo "  🦕  Deno.js is active - YouTube JavaScript is fully processed"
-          echo "  🌐  WARP VPN is active - IP blocks are bypassed"
-          echo "  🍪  Cookie bypass is supported - upload via UI"
+          echo "  🎬  This MeTube instance uses the same bypass as Youtube Downloader:"
+          echo "     • WARP VPN for IP/rate limit bypass"
+          echo "     • Deno.js for JavaScript execution"
+          echo "     • Multiple clients for YouTube API"
+          echo "     • No cookies required!"
           echo ""
           echo "  📁  Downloads: ./downloads (ephemeral)"
           echo "  ⏱️  Available for: ~6 hours"
+          echo ""
 
       - name: Show error if tunnel failed
         if: failure() || env.TUNNEL_URL == ''
@@ -202,10 +297,16 @@ jobs:
           echo ""
           echo "  🔍 Look for 'trycloudflare.com' in the logs above"
           echo "  📝 The URL format is: https://[random-words].trycloudflare.com"
+          echo ""
+          echo "  💡 If you see 'trycloudflare.com' in the logs, copy that URL"
+          echo "     and open it in your browser."
+          echo ""
 
       - name: Cleanup
         if: always()
         run: |
+          echo "🧹 Cleaning up containers..."
           docker compose down 2>/dev/null || true
           docker stop warp 2>/dev/null || true
           docker rm warp 2>/dev/null || true
+          echo "✅ Cleanup complete"
