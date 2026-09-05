@@ -1,0 +1,43 @@
+name: Run MeTube with TryCloudflare
+
+on:
+  workflow_dispatch: # Allows you to run it manually from GitHub Actions tab
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Create docker-compose.yml
+        run: |
+          cat > docker-compose.yml << EOF
+          services:
+            metube:
+              image: ghcr.io/alexta69/metube:latest
+              container_name: metube
+              restart: unless-stopped
+              ports:
+                - "8081:8081"
+              volumes:
+                - ./downloads:/downloads
+              environment:
+                - TZ=UTC
+                # You can add more environment variables here, e.g.:
+                # - MAX_CONCURRENT_DOWNLOADS=3
+                # - DEFAULT_THEME=dark
+          EOF
+
+      - name: Start MeTube
+        run: docker compose up -d
+
+      - name: Install cloudflared
+        run: |
+          curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o cloudflared
+          chmod +x cloudflared
+          sudo mv cloudflared /usr/local/bin/
+
+      - name: Run cloudflared tunnel to MeTube
+        run: |
+          cloudflared tunnel --url http://localhost:8081 --protocol http2
