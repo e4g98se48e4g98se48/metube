@@ -1,192 +1,905 @@
-name: MeTube with WARP + Deno.js Bypass
+name: 🦙 Llama 1B Web Interface
 
 on:
   workflow_dispatch:
+    inputs:
+      model:
+        description: '📦 Model to download from Ollama'
+        required: false
+        default: 'llama3.2:1b'
+        type: choice
+        options:
+          - 'llama3.2:1b'
+          - 'llama3.2:3b'
+          - 'llama3.1:8b'
+          - 'phi3:mini'
+          - 'mistral:7b'
+          - 'gemma:2b'
+          - 'tinyllama:1.1b'
+          - 'qwen2.5:0.5b'
+          - 'qwen2.5:1.5b'
+          - 'llama2:7b'
+      port:
+        description: '🔌 Web UI port'
+        required: false
+        default: '7860'
+        type: string
+      context_size:
+        description: '📝 Context size (tokens)'
+        required: false
+        default: '4096'
+        type: string
 
 jobs:
-  deploy:
+  deploy-llama:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     
     steps:
-      - name: Checkout code
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Show Banner
+      - name: 🦙 Show Banner
         run: |
           echo "╔═══════════════════════════════════════════════════════════════════╗"
           echo "║                                                                   ║"
-          echo "║         🎬  M E T U B E   W I T H   F U L L   B Y P A S S       ║"
+          echo "║           🦙  L L A M A   1 B   W E B   U I                     ║"
           echo "║                                                                   ║"
           echo "╚═══════════════════════════════════════════════════════════════════╝"
           echo ""
-          echo "  🌐 WARP VPN + 🦕 Deno.js = Full YouTube Bypass"
-          echo "  🍪 No cookies needed - works like Youtube Downloader"
+          echo "  📦 Model: ${{ github.event.inputs.model }}"
+          echo "  📝 Context: ${{ github.event.inputs.context_size }} tokens"
+          echo "  🔌 Port: ${{ github.event.inputs.port }}"
+          echo "  🏃 Runner: $(uname -a)"
+          echo "  💾 Memory: $(free -h | grep Mem | awk '{print $2}')"
+          echo "  🧠 CPU: $(nproc) cores"
           echo ""
 
-      - name: Start WARP Container
+      - name: 🐍 Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 📦 Install Dependencies
         run: |
           echo "──────────────────────────────────────────"
-          echo " 🌐  NETWORK  ·  Starting Cloudflare WARP"
+          echo " 📦  Installing required packages"
           echo "──────────────────────────────────────────"
           
-          docker network create warp-net 2>/dev/null || true
+          # Install Ollama
+          echo "🔧 Installing Ollama..."
+          curl -fsSL https://ollama.com/install.sh | sh
           
-          docker run -d \
-            --name warp \
-            --restart=always \
-            --network warp-net \
-            -p 1080:1080 \
-            --cap-add NET_ADMIN \
-            --sysctl net.ipv6.conf.all.disable_ipv6=0 \
-            --sysctl net.ipv4.conf.all.src_valid_mark=1 \
-            -v warp-data:/var/lib/cloudflare-warp \
-            caomingjun/warp:latest
+          # Install Python packages
+          echo "🐍 Installing Python packages..."
+          pip install --no-cache-dir \
+            fastapi \
+            uvicorn \
+            aiohttp \
+            httpx \
+            python-multipart \
+            jinja2 \
+            websockets \
+            pydantic
+
+          # Verify installations
+          ollama --version || echo "⚠️ Ollama version check"
+          python --version
+          echo "✅ Dependencies installed!"
+
+      - name: 📥 Download Model from Ollama
+        run: |
+          echo "──────────────────────────────────────────"
+          echo " 📥  Downloading model: ${{ github.event.inputs.model }}"
+          echo "──────────────────────────────────────────"
           
-          echo "⏳ Waiting for WARP to initialize (20s)..."
-          sleep 20
+          MODEL="${{ github.event.inputs.model }}"
           
-          echo "🔎 Checking WARP status..."
-          for i in {1..8}; do
-            RESULT=$(curl -s --max-time 5 --socks5-hostname 127.0.0.1:1080 https://cloudflare.com/cdn-cgi/trace 2>/dev/null || echo "failed")
-            if echo "$RESULT" | grep -qE "warp=(on|plus)"; then
-              echo "✅ WARP is active!"
-              echo "$RESULT" | grep -E "warp=|colo=|ip="
+          echo "⏳ This may take 3-10 minutes depending on model size..."
+          echo ""
+          
+          # Download the model
+          ollama pull "$MODEL"
+          
+          echo ""
+          echo "✅ Model downloaded successfully!"
+          echo ""
+          echo "📊 Installed models:"
+          ollama list
+
+      - name: 🔧 Create Ollama Server Script
+        run: |
+          cat > ollama_server.py << 'EOF'
+          #!/usr/bin/env python3
+          """
+          🦙 Ollama Web Server - Single File Interface
+          """
+          
+          import json
+          import asyncio
+          import subprocess
+          import shutil
+          from pathlib import Path
+          from typing import Optional, Dict, List, Any
+          from fastapi import FastAPI, HTTPException, Request
+          from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+          from fastapi.staticfiles import StaticFiles
+          from pydantic import BaseModel
+          import uvicorn
+          import httpx
+          import logging
+          import sys
+          import os
+          from datetime import datetime
+          
+          # Setup logging
+          logging.basicConfig(level=logging.INFO)
+          logger = logging.getLogger(__name__)
+          
+          # Configuration
+          OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+          CONTEXT_SIZE = int(os.getenv("CONTEXT_SIZE", "4096"))
+          MODEL_NAME = os.getenv("MODEL_NAME", "llama3.2:1b")
+          PORT = int(os.getenv("PORT", "7860"))
+          
+          app = FastAPI(title="🦙 Llama Web UI", description="Local LLM Interface")
+          
+          # Request/Response Models
+          class ChatMessage(BaseModel):
+              role: str
+              content: str
+          
+          class ChatRequest(BaseModel):
+              messages: List[ChatMessage]
+              temperature: Optional[float] = 0.7
+              max_tokens: Optional[int] = 2048
+              stream: Optional[bool] = False
+          
+          class GenerateRequest(BaseModel):
+              prompt: str
+              temperature: Optional[float] = 0.7
+              max_tokens: Optional[int] = 2048
+              stream: Optional[bool] = False
+          
+          class ModelInfo(BaseModel):
+              name: str
+              size: str
+              modified: str
+          
+          # ================================================================
+          #  HTML UI Template
+          # ================================================================
+          HTML_TEMPLATE = '''
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+              <meta charset="UTF-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <title>🦙 Llama Web UI</title>
+              <style>
+                  * {
+                      margin: 0;
+                      padding: 0;
+                      box-sizing: border-box;
+                  }
+                  body {
+                      background: #0d1117;
+                      color: #c9d1d9;
+                      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                      height: 100vh;
+                      display: flex;
+                      flex-direction: column;
+                  }
+                  .header {
+                      background: #161b22;
+                      border-bottom: 1px solid #30363d;
+                      padding: 16px 24px;
+                      display: flex;
+                      justify-content: space-between;
+                      align-items: center;
+                      flex-shrink: 0;
+                  }
+                  .header h1 {
+                      font-size: 20px;
+                      font-weight: 600;
+                      display: flex;
+                      align-items: center;
+                      gap: 10px;
+                  }
+                  .header .badge {
+                      background: #238636;
+                      color: #fff;
+                      padding: 2px 10px;
+                      border-radius: 12px;
+                      font-size: 12px;
+                  }
+                  .header .model-name {
+                      color: #8b949e;
+                      font-size: 14px;
+                  }
+                  .status-bar {
+                      padding: 8px 24px;
+                      background: #0d1117;
+                      border-bottom: 1px solid #21262d;
+                      font-size: 13px;
+                      color: #8b949e;
+                      flex-shrink: 0;
+                      display: flex;
+                      justify-content: space-between;
+                  }
+                  .status-bar .status-dot {
+                      display: inline-block;
+                      width: 10px;
+                      height: 10px;
+                      border-radius: 50%;
+                      margin-right: 8px;
+                  }
+                  .status-bar .status-dot.online { background: #3fb950; }
+                  .status-bar .status-dot.offline { background: #da3633; }
+                  
+                  .chat-container {
+                      flex: 1;
+                      overflow-y: auto;
+                      padding: 24px;
+                      display: flex;
+                      flex-direction: column;
+                      gap: 16px;
+                  }
+                  .message {
+                      max-width: 85%;
+                      padding: 12px 16px;
+                      border-radius: 12px;
+                      line-height: 1.6;
+                      word-wrap: break-word;
+                      white-space: pre-wrap;
+                  }
+                  .message.user {
+                      align-self: flex-end;
+                      background: #238636;
+                      color: #fff;
+                  }
+                  .message.assistant {
+                      align-self: flex-start;
+                      background: #21262d;
+                      border: 1px solid #30363d;
+                  }
+                  .message .role-label {
+                      font-size: 11px;
+                      font-weight: 600;
+                      opacity: 0.7;
+                      margin-bottom: 4px;
+                  }
+                  .message .content {
+                      font-size: 15px;
+                  }
+                  .message .content .loading-dots::after {
+                      content: '...';
+                      animation: dots 1.5s steps(4, end) infinite;
+                  }
+                  @keyframes dots {
+                      0% { content: ''; }
+                      25% { content: '.'; }
+                      50% { content: '..'; }
+                      75% { content: '...'; }
+                  }
+                  
+                  .input-area {
+                      background: #161b22;
+                      border-top: 1px solid #30363d;
+                      padding: 16px 24px;
+                      flex-shrink: 0;
+                      display: flex;
+                      gap: 12px;
+                  }
+                  .input-area textarea {
+                      flex: 1;
+                      background: #0d1117;
+                      border: 1px solid #30363d;
+                      border-radius: 8px;
+                      color: #c9d1d9;
+                      padding: 12px;
+                      font-family: inherit;
+                      font-size: 14px;
+                      resize: none;
+                      outline: none;
+                      min-height: 52px;
+                      max-height: 150px;
+                      transition: border-color 0.2s;
+                  }
+                  .input-area textarea:focus {
+                      border-color: #58a6ff;
+                  }
+                  .input-area textarea::placeholder {
+                      color: #484f58;
+                  }
+                  .input-area button {
+                      background: #238636;
+                      border: none;
+                      border-radius: 8px;
+                      color: #fff;
+                      padding: 0 24px;
+                      font-weight: 600;
+                      font-size: 14px;
+                      cursor: pointer;
+                      transition: background 0.2s;
+                      white-space: nowrap;
+                      min-height: 52px;
+                  }
+                  .input-area button:hover {
+                      background: #2ea043;
+                  }
+                  .input-area button:disabled {
+                      opacity: 0.5;
+                      cursor: not-allowed;
+                  }
+                  
+                  .settings-row {
+                      padding: 8px 24px;
+                      background: #0d1117;
+                      border-bottom: 1px solid #21262d;
+                      display: flex;
+                      gap: 16px;
+                      flex-wrap: wrap;
+                      align-items: center;
+                      flex-shrink: 0;
+                      font-size: 13px;
+                  }
+                  .settings-row label {
+                      display: flex;
+                      align-items: center;
+                      gap: 6px;
+                      color: #8b949e;
+                  }
+                  .settings-row input[type="range"] {
+                      width: 100px;
+                      background: #21262d;
+                      height: 4px;
+                      -webkit-appearance: none;
+                  }
+                  .settings-row input[type="range"]::-webkit-slider-thumb {
+                      -webkit-appearance: none;
+                      width: 14px;
+                      height: 14px;
+                      border-radius: 50%;
+                      background: #58a6ff;
+                      cursor: pointer;
+                  }
+                  .settings-row .value {
+                      color: #c9d1d9;
+                      font-weight: 600;
+                      min-width: 30px;
+                  }
+                  
+                  .footer {
+                      padding: 8px 24px;
+                      text-align: center;
+                      font-size: 12px;
+                      color: #484f58;
+                      border-top: 1px solid #21262d;
+                      flex-shrink: 0;
+                  }
+                  
+                  /* Scrollbar */
+                  .chat-container::-webkit-scrollbar {
+                      width: 8px;
+                  }
+                  .chat-container::-webkit-scrollbar-track {
+                      background: #0d1117;
+                  }
+                  .chat-container::-webkit-scrollbar-thumb {
+                      background: #30363d;
+                      border-radius: 4px;
+                  }
+                  .chat-container::-webkit-scrollbar-thumb:hover {
+                      background: #484f58;
+                  }
+                  
+                  @media (max-width: 640px) {
+                      .header { flex-wrap: wrap; gap: 8px; }
+                      .input-area { flex-wrap: wrap; }
+                      .input-area textarea { min-height: 44px; }
+                      .input-area button { min-height: 44px; padding: 0 16px; }
+                      .message { max-width: 95%; }
+                  }
+              </style>
+          </head>
+          <body>
+              <div class="header">
+                  <h1>
+                      🦙 Llama Web UI
+                      <span class="badge">Local</span>
+                  </h1>
+                  <span class="model-name">📦 {{ model_name }}</span>
+              </div>
+              
+              <div class="status-bar">
+                  <span>
+                      <span class="status-dot online" id="statusDot"></span>
+                      <span id="statusText">Ollama Online</span>
+                  </span>
+                  <span id="tokenCount">Tokens: 0</span>
+              </div>
+              
+              <div class="settings-row">
+                  <label>
+                      🌡️ Temperature
+                      <input type="range" id="temperature" min="0" max="2" step="0.1" value="0.7">
+                      <span class="value" id="tempValue">0.7</span>
+                  </label>
+                  <label>
+                      📝 Max Tokens
+                      <input type="range" id="maxTokens" min="128" max="4096" step="128" value="2048">
+                      <span class="value" id="maxTokensValue">2048</span>
+                  </label>
+                  <label>
+                      <input type="checkbox" id="streamCheck" checked>
+                      Stream response
+                  </label>
+                  <button onclick="clearChat()" style="background:#21262d;border:1px solid #30363d;color:#c9d1d9;padding:4px 12px;border-radius:6px;cursor:pointer;font-size:13px;">
+                      🗑️ Clear
+                  </button>
+              </div>
+              
+              <div class="chat-container" id="chatContainer">
+                  <div class="message assistant">
+                      <div class="role-label">🤖 Assistant</div>
+                      <div class="content">Hello! I'm running <strong>{{ model_name }}</strong> locally.<br>Ask me anything! 😊</div>
+                  </div>
+              </div>
+              
+              <div class="input-area">
+                  <textarea id="userInput" placeholder="Type your message here..." rows="1"></textarea>
+                  <button id="sendButton" onclick="sendMessage()">🚀 Send</button>
+              </div>
+              
+              <div class="footer">
+                  🦙 Powered by Ollama • {{ model_name }} • {{ context_size }} context
+              </div>
+          
+              <script>
+                  // ================================================================
+                  //  Chat Logic
+                  // ================================================================
+                  const chatContainer = document.getElementById('chatContainer');
+                  const userInput = document.getElementById('userInput');
+                  const sendButton = document.getElementById('sendButton');
+                  const statusText = document.getElementById('statusText');
+                  const statusDot = document.getElementById('statusDot');
+                  const tokenCount = document.getElementById('tokenCount');
+                  let isStreaming = false;
+                  let totalTokens = 0;
+                  
+                  // Auto-resize textarea
+                  userInput.addEventListener('input', function() {
+                      this.style.height = 'auto';
+                      this.style.height = Math.min(this.scrollHeight, 150) + 'px';
+                  });
+                  
+                  // Enter to send
+                  userInput.addEventListener('keydown', function(e) {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          sendMessage();
+                      }
+                  });
+                  
+                  // Temperature slider
+                  document.getElementById('temperature').addEventListener('input', function() {
+                      document.getElementById('tempValue').textContent = this.value;
+                  });
+                  
+                  document.getElementById('maxTokens').addEventListener('input', function() {
+                      document.getElementById('maxTokensValue').textContent = this.value;
+                  });
+                  
+                  function addMessage(role, content, isStreaming = false) {
+                      const div = document.createElement('div');
+                      div.className = `message ${role}`;
+                      
+                      const label = document.createElement('div');
+                      label.className = 'role-label';
+                      label.textContent = role === 'user' ? '👤 You' : '🤖 Assistant';
+                      
+                      const contentDiv = document.createElement('div');
+                      contentDiv.className = 'content';
+                      if (isStreaming) {
+                          contentDiv.innerHTML = content + '<span class="loading-dots"></span>';
+                      } else {
+                          contentDiv.textContent = content;
+                      }
+                      
+                      div.appendChild(label);
+                      div.appendChild(contentDiv);
+                      chatContainer.appendChild(div);
+                      chatContainer.scrollTop = chatContainer.scrollHeight;
+                      return contentDiv;
+                  }
+                  
+                  function updateLastMessage(content, isComplete = false) {
+                      const messages = chatContainer.querySelectorAll('.message.assistant');
+                      if (messages.length === 0) return;
+                      const lastMsg = messages[messages.length - 1];
+                      const contentDiv = lastMsg.querySelector('.content');
+                      if (contentDiv) {
+                          if (isComplete) {
+                              contentDiv.textContent = content;
+                          } else {
+                              contentDiv.innerHTML = content + '<span class="loading-dots"></span>';
+                          }
+                          chatContainer.scrollTop = chatContainer.scrollHeight;
+                      }
+                  }
+                  
+                  function clearChat() {
+                      // Keep only the first assistant message
+                      const messages = chatContainer.querySelectorAll('.message');
+                      for (let i = 1; i < messages.length; i++) {
+                          messages[i].remove();
+                      }
+                      totalTokens = 0;
+                      tokenCount.textContent = 'Tokens: 0';
+                  }
+                  
+                  async function sendMessage() {
+                      if (isStreaming) return;
+                      
+                      const text = userInput.value.trim();
+                      if (!text) return;
+                      
+                      // Add user message
+                      addMessage('user', text);
+                      userInput.value = '';
+                      userInput.style.height = 'auto';
+                      sendButton.disabled = true;
+                      isStreaming = true;
+                      
+                      // Add placeholder for assistant
+                      const tempDiv = addMessage('assistant', 'Thinking...', true);
+                      
+                      try {
+                          const temperature = parseFloat(document.getElementById('temperature').value);
+                          const maxTokens = parseInt(document.getElementById('maxTokens').value);
+                          const stream = document.getElementById('streamCheck').checked;
+                          
+                          const response = await fetch('/api/chat', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({
+                                  messages: [{ role: 'user', content: text }],
+                                  temperature: temperature,
+                                  max_tokens: maxTokens,
+                                  stream: stream
+                              })
+                          });
+                          
+                          if (!response.ok) {
+                              const error = await response.text();
+                              throw new Error(error || 'Server error');
+                          }
+                          
+                          if (stream) {
+                              // Streaming response
+                              const reader = response.body.getReader();
+                              const decoder = new TextDecoder();
+                              let fullContent = '';
+                              let buffer = '';
+                              
+                              while (true) {
+                                  const { done, value } = await reader.read();
+                                  if (done) break;
+                                  
+                                  buffer += decoder.decode(value, { stream: true });
+                                  const lines = buffer.split('\\n');
+                                  buffer = lines.pop() || '';
+                                  
+                                  for (const line of lines) {
+                                      if (line.startsWith('data: ')) {
+                                          const data = line.slice(6);
+                                          if (data === '[DONE]') continue;
+                                          try {
+                                              const parsed = JSON.parse(data);
+                                              if (parsed.content) {
+                                                  fullContent += parsed.content;
+                                                  updateLastMessage(fullContent, false);
+                                                  totalTokens += parsed.tokens || 1;
+                                                  tokenCount.textContent = `Tokens: ${totalTokens}`;
+                                              }
+                                          } catch (e) {}
+                                      }
+                                  }
+                              }
+                              // Final update
+                              updateLastMessage(fullContent, true);
+                              totalTokens += Math.ceil(fullContent.length / 4);
+                              tokenCount.textContent = `Tokens: ${totalTokens}`;
+                          } else {
+                              // Non-streaming
+                              const data = await response.json();
+                              updateLastMessage(data.content, true);
+                              totalTokens += data.tokens || Math.ceil(data.content.length / 4);
+                              tokenCount.textContent = `Tokens: ${totalTokens}`;
+                          }
+                          
+                      } catch (error) {
+                          console.error('Error:', error);
+                          updateLastMessage('❌ Error: ' + error.message, true);
+                      }
+                      
+                      sendButton.disabled = false;
+                      isStreaming = false;
+                      userInput.focus();
+                  }
+                  
+                  // Check status periodically
+                  async function checkStatus() {
+                      try {
+                          const response = await fetch('/api/status');
+                          const data = await response.json();
+                          if (data.status === 'online') {
+                              statusDot.className = 'status-dot online';
+                              statusText.textContent = 'Ollama Online';
+                          } else {
+                              statusDot.className = 'status-dot offline';
+                              statusText.textContent = 'Ollama Offline';
+                          }
+                      } catch (e) {
+                          statusDot.className = 'status-dot offline';
+                          statusText.textContent = 'Server Offline';
+                      }
+                  }
+                  setInterval(checkStatus, 30000);
+                  checkStatus();
+              </script>
+          </body>
+          </html>
+          '''
+          
+          # ================================================================
+          #  FastAPI Endpoints
+          # ================================================================
+          
+          @app.get("/", response_class=HTMLResponse)
+          async def root():
+              """Serve the web UI"""
+              return HTML_TEMPLATE.replace(
+                  "{{ model_name }}", MODEL_NAME
+              ).replace(
+                  "{{ context_size }}", str(CONTEXT_SIZE)
+              )
+          
+          @app.get("/api/status")
+          async def status():
+              """Check if Ollama is running"""
+              try:
+                  async with httpx.AsyncClient(timeout=3) as client:
+                      resp = await client.get(f"{OLLAMA_HOST}/api/tags")
+                      if resp.status_code == 200:
+                          return {"status": "online", "models": resp.json()}
+              except:
+                  pass
+              return {"status": "offline"}
+          
+          @app.get("/api/models")
+          async def list_models():
+              """List downloaded models"""
+              try:
+                  async with httpx.AsyncClient(timeout=5) as client:
+                      resp = await client.get(f"{OLLAMA_HOST}/api/tags")
+                      if resp.status_code == 200:
+                          return resp.json()
+              except:
+                  pass
+              return {"models": []}
+          
+          @app.post("/api/chat")
+          async def chat(request: ChatRequest):
+              """Chat with Ollama"""
+              try:
+                  # Convert messages to Ollama format
+                  ollama_messages = [{"role": m.role, "content": m.content} for m in request.messages]
+                  
+                  if request.stream:
+                      # Streaming response
+                      async def generate():
+                          try:
+                              async with httpx.AsyncClient(timeout=120) as client:
+                                  async with client.stream(
+                                      "POST",
+                                      f"{OLLAMA_HOST}/api/chat",
+                                      json={
+                                          "model": MODEL_NAME,
+                                          "messages": ollama_messages,
+                                          "stream": True,
+                                          "options": {
+                                              "temperature": request.temperature,
+                                              "num_predict": request.max_tokens,
+                                              "num_ctx": CONTEXT_SIZE
+                                          }
+                                      }
+                                  ) as response:
+                                      async for chunk in response.aiter_bytes():
+                                          try:
+                                              data = chunk.decode('utf-8').strip()
+                                              if data:
+                                                  lines = data.split('\\n')
+                                                  for line in lines:
+                                                      if line.strip():
+                                                          try:
+                                                              json_data = json.loads(line)
+                                                              if "message" in json_data and "content" in json_data["message"]:
+                                                                  content = json_data["message"]["content"]
+                                                                  yield f"data: {json.dumps({'content': content})}\\n\\n"
+                                                          except json.JSONDecodeError:
+                                                              continue
+                                          except:
+                                              continue
+                          except Exception as e:
+                              yield f"data: {json.dumps({'error': str(e)})}\\n\\n"
+                          yield "data: [DONE]\\n\\n"
+                      
+                      return StreamingResponse(generate(), media_type="text/event-stream")
+                  else:
+                      # Non-streaming response
+                      async with httpx.AsyncClient(timeout=120) as client:
+                          resp = await client.post(
+                              f"{OLLAMA_HOST}/api/chat",
+                              json={
+                                  "model": MODEL_NAME,
+                                  "messages": ollama_messages,
+                                  "stream": False,
+                                  "options": {
+                                      "temperature": request.temperature,
+                                      "num_predict": request.max_tokens,
+                                      "num_ctx": CONTEXT_SIZE
+                                  }
+                              }
+                          )
+                          data = resp.json()
+                          return {
+                              "content": data.get("message", {}).get("content", ""),
+                              "tokens": data.get("eval_count", 0)
+                          }
+              except Exception as e:
+                  raise HTTPException(status_code=500, detail=str(e))
+          
+          @app.post("/api/generate")
+          async def generate(request: GenerateRequest):
+              """Generate text"""
+              try:
+                  if request.stream:
+                      async def generate():
+                          try:
+                              async with httpx.AsyncClient(timeout=120) as client:
+                                  async with client.stream(
+                                      "POST",
+                                      f"{OLLAMA_HOST}/api/generate",
+                                      json={
+                                          "model": MODEL_NAME,
+                                          "prompt": request.prompt,
+                                          "stream": True,
+                                          "options": {
+                                              "temperature": request.temperature,
+                                              "num_predict": request.max_tokens,
+                                              "num_ctx": CONTEXT_SIZE
+                                          }
+                                      }
+                                  ) as response:
+                                      async for chunk in response.aiter_bytes():
+                                          try:
+                                              data = chunk.decode('utf-8').strip()
+                                              if data:
+                                                  lines = data.split('\\n')
+                                                  for line in lines:
+                                                      if line.strip():
+                                                          try:
+                                                              json_data = json.loads(line)
+                                                              if "response" in json_data:
+                                                                  yield f"data: {json.dumps({'content': json_data['response']})}\\n\\n"
+                                                          except:
+                                                              continue
+                                          except:
+                                              continue
+                          except Exception as e:
+                              yield f"data: {json.dumps({'error': str(e)})}\\n\\n"
+                          yield "data: [DONE]\\n\\n"
+                      return StreamingResponse(generate(), media_type="text/event-stream")
+                  else:
+                      async with httpx.AsyncClient(timeout=120) as client:
+                          resp = await client.post(
+                              f"{OLLAMA_HOST}/api/generate",
+                              json={
+                                  "model": MODEL_NAME,
+                                  "prompt": request.prompt,
+                                  "stream": False,
+                                  "options": {
+                                      "temperature": request.temperature,
+                                      "num_predict": request.max_tokens,
+                                      "num_ctx": CONTEXT_SIZE
+                                  }
+                              }
+                          )
+                          data = resp.json()
+                          return {
+                              "content": data.get("response", ""),
+                              "tokens": data.get("eval_count", 0)
+                              }
+              except Exception as e:
+                  raise HTTPException(status_code=500, detail=str(e))
+          
+          # ================================================================
+          #  Main Entry Point
+          # ================================================================
+          
+          if __name__ == "__main__":
+              print("🦙 Starting Llama Web UI...")
+              print(f"   Model: {MODEL_NAME}")
+              print(f"   Context: {CONTEXT_SIZE}")
+              print(f"   Port: {PORT}")
+              print(f"   Ollama: {OLLAMA_HOST}")
+              print("")
+              print("🌐 Open http://localhost:" + str(PORT) + " in your browser")
+              print("")
+              
+              uvicorn.run(
+                  app,
+                  host="0.0.0.0",
+                  port=PORT,
+                  log_level="info"
+              )
+          EOF
+          
+          echo "✅ Server script created!"
+
+      - name: 🚀 Start Ollama Server
+        run: |
+          echo "──────────────────────────────────────────"
+          echo " 🚀  Starting Ollama server"
+          echo "──────────────────────────────────────────"
+          
+          # Start Ollama in background
+          ollama serve &
+          
+          # Wait for Ollama to be ready
+          echo "⏳ Waiting for Ollama to be ready..."
+          for i in {1..30}; do
+            if curl -s http://localhost:11434/api/tags > /dev/null 2>&1; then
+              echo "✅ Ollama is ready!"
               break
-            else
-              echo "   attempt $i/8 — not ready yet, waiting..."
-              sleep 5
             fi
+            sleep 2
           done
           
-          FINAL=$(curl -s --max-time 10 --socks5-hostname 127.0.0.1:1080 https://cloudflare.com/cdn-cgi/trace 2>/dev/null || echo "failed")
-          if echo "$FINAL" | grep -qE "warp=(on|plus)"; then
-            echo "✅ WARP proxy is ready!"
-          else
-            echo "⚠️  WARP might not be fully active, continuing anyway..."
-          fi
+          echo "📊 Ollama status:"
+          curl -s http://localhost:11434/api/tags | python -m json.tool || echo "⚠️ Status check"
 
-      - name: Build MeTube with Deno.js (FINAL FIX)
+      - name: 🔧 Start Web Server
         run: |
           echo "──────────────────────────────────────────"
-          echo " 🔨  BUILD  ·  Creating MeTube with Deno"
+          echo " 🌐  Starting Web UI server"
           echo "──────────────────────────────────────────"
           
-          # Create Dockerfile with Deno.js - FINAL FIX: Run everything as root
-          cat > Dockerfile.metube << 'EOF'
-          FROM ghcr.io/alexta69/metube:latest
+          # Set environment variables for the server
+          export MODEL_NAME="${{ github.event.inputs.model }}"
+          export CONTEXT_SIZE="${{ github.event.inputs.context_size }}"
+          export PORT="${{ github.event.inputs.port }}"
           
-          USER root
+          # Start the server in background
+          python ollama_server.py &
           
-          # Install Deno.js
-          RUN apt-get update && apt-get install -y curl unzip && \
-              curl -fsSL https://deno.land/install.sh | sh && \
-              export DENO_INSTALL="/root/.deno" && \
-              export PATH="$DENO_INSTALL/bin:$PATH" && \
-              /root/.deno/bin/deno --version
-          
-          # Set environment for Deno
-          ENV DENO_INSTALL="/root/.deno"
-          ENV PATH="$DENO_INSTALL/bin:$PATH"
-          
-          # Install latest yt-dlp
-          RUN pip3 install --upgrade yt-dlp
-          
-          # Verify Deno is accessible
-          RUN /root/.deno/bin/deno --version
-          
-          # Stay as root to avoid user issues
-          USER root
-          EOF
-          
-          # Build the custom image
-          docker build -f Dockerfile.metube -t metube-deno:latest .
-          echo "✅ Custom MeTube with Deno.js built!"
+          # Wait for server to be ready
+          echo "⏳ Waiting for web server to start..."
+          for i in {1..15}; do
+            if curl -s http://localhost:${{ github.event.inputs.port }} > /dev/null 2>&1; then
+              echo "✅ Web UI is ready!"
+              break
+            fi
+            sleep 2
+          done
 
-      - name: Create docker-compose with full bypass
-        run: |
-          cat > docker-compose.yml << 'EOF'
-          services:
-            metube:
-              image: metube-deno:latest
-              container_name: metube
-              restart: unless-stopped
-              ports:
-                - "8081:8081"
-              volumes:
-                - ./downloads:/downloads
-              user: root
-              environment:
-                - TZ=UTC
-                - HOST=0.0.0.0
-                - MAX_CONCURRENT_DOWNLOADS=5
-                - DEFAULT_THEME=dark
-                - LOGLEVEL=INFO
-                - DENO_INSTALL=/root/.deno
-                - PATH=/root/.deno/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-                - YTDL_OPTIONS={"proxy":"socks5://host.docker.internal:1080","extractor_args":{"youtube":{"player_client":["web","mweb","android","android_vr"],"skip":["hls","dash"]}},"js_runtimes":"deno","remote_components":"ejs:github","writesubtitles":true,"subtitleslangs":["en","fa"],"writeautomaticsub":true,"updatetime":false,"user_agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36","add_headers":{"Accept-Language":"en-US,en;q=0.9","Accept-Encoding":"gzip, deflate, br"},"sleep_interval":10,"max_sleep_interval":30,"retries":20,"fragment_retries":20}
-              extra_hosts:
-                - "host.docker.internal:host-gateway"
-          EOF
-          
-          echo "✅ Docker Compose created"
-
-      - name: Start MeTube with full bypass
+      - name: 📦 Install Cloudflared
         run: |
           echo "──────────────────────────────────────────"
-          echo " 🚀  START  ·  Launching MeTube"
-          echo "──────────────────────────────────────────"
-          
-          docker compose up -d
-          
-          echo "⏳ Waiting for services to start..."
-          sleep 15
-          
-          echo ""
-          echo "📊 Container status:"
-          docker ps
-          
-          echo ""
-          echo "📋 MeTube logs:"
-          docker logs metube 2>&1 | head -30
-          
-          echo ""
-          echo "🔍 Verifying Deno.js in container:"
-          docker exec metube deno --version || echo "⚠️ Deno check"
-          
-          echo ""
-          echo "🔍 Verifying WARP connectivity:"
-          docker exec metube curl -s --socks5-hostname host.docker.internal:1080 https://cloudflare.com/cdn-cgi/trace | grep -E "warp=|colo=|ip=" || echo "⚠️ WARP check"
-          
-          echo ""
-          echo "✅ MeTube is running!"
-
-      - name: Test YouTube access
-        run: |
-          echo "──────────────────────────────────────────"
-          echo " 🧪  TEST  ·  Verifying YouTube access"
-          echo "──────────────────────────────────────────"
-          
-          docker exec metube sh -c "
-            export DENO_INSTALL=/root/.deno
-            export PATH=\$DENO_INSTALL/bin:\$PATH
-            
-            echo '📌 Testing with Deno.js + WARP...'
-            
-            yt-dlp \
-              --proxy socks5://host.docker.internal:1080 \
-              --js-runtimes deno \
-              --remote-components ejs:github \
-              --extractor-args youtube:player_client=web \
-              --dump-json --skip-download \
-              --no-warnings \
-              'https://www.youtube.com/watch?v=dQw4w9WgXcQ' \
-              2>&1 | head -20
-          " || echo "⚠️ Test completed"
-
-      - name: Install cloudflared
-        run: |
-          echo "──────────────────────────────────────────"
-          echo " 📦  SETUP  ·  Installing cloudflared"
+          echo " 📦  Installing Cloudflared"
           echo "──────────────────────────────────────────"
           
           curl -L -s https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o cloudflared
@@ -194,14 +907,16 @@ jobs:
           sudo mv cloudflared /usr/local/bin/
           cloudflared --version
 
-      - name: Create Tunnel and Display URL
+      - name: 🌐 Create Tunnel
         id: tunnel
         run: |
           echo "──────────────────────────────────────────"
-          echo " 🌐  TUNNEL  ·  Creating Cloudflare tunnel"
+          echo " 🌐  Creating Cloudflare tunnel"
           echo "──────────────────────────────────────────"
           
-          cloudflared tunnel --url http://127.0.0.1:8081 --protocol http2 2>&1 | tee tunnel.log &
+          PORT="${{ github.event.inputs.port }}"
+          
+          cloudflared tunnel --url http://127.0.0.1:$PORT --protocol http2 2>&1 | tee tunnel.log &
           TUNNEL_PID=$!
           
           echo "⏳ Waiting for tunnel URL..."
@@ -224,7 +939,7 @@ jobs:
           echo ""
           echo "╔═══════════════════════════════════════════════════════════════════╗"
           echo "║                                                                   ║"
-          echo "║         🎉  M E T U B E   I S   R E A D Y !  🎉                 ║"
+          echo "║           🎉  L L A M A   I S   R E A D Y !  🎉                 ║"
           echo "║                                                                   ║"
           echo "╠═══════════════════════════════════════════════════════════════════╣"
           echo "║                                                                   ║"
@@ -235,19 +950,20 @@ jobs:
           fi
           echo "║                                                                   ║"
           echo "╠═══════════════════════════════════════════════════════════════════╣"
-          echo "║  🌐  WARP VPN      → Active (bypasses IP/rate limits)            ║"
-          echo "║  🦕  Deno.js       → Active (executes YouTube JS challenges)     ║"
-          echo "║  🍪  Cookies       → Not required (like Youtube Downloader)      ║"
+          echo "║  🦙  Model: ${{ github.event.inputs.model }}                     ║"
+          echo "║  📝  Context: ${{ github.event.inputs.context_size }} tokens    ║"
+          echo "║  🌐  Status: Online & Ready                                      ║"
           echo "║                                                                   ║"
           echo "╠═══════════════════════════════════════════════════════════════════╣"
           echo "║  📌  HOW TO USE:                                                  ║"
           echo "║  1. Open the URL above in your browser                           ║"
-          echo "║  2. Paste any YouTube URL (e.g., V0w3IfLO4SA)                   ║"
-          echo "║  3. Click Download - it will bypass all blocks!                  ║"
+          echo "║  2. Type your message in the chat box                            ║"
+          echo "║  3. Click Send or press Enter                                    ║"
+          echo "║  4. Adjust Temperature and Max Tokens in settings                ║"
           echo "║                                                                   ║"
           echo "╠═══════════════════════════════════════════════════════════════════╣"
           echo "║  ⏱️  Tunnel expires in ~6 hours (GitHub Action limit)            ║"
-          echo "║  📁  Downloads: ./downloads (ephemeral)                          ║"
+          echo "║  🧠  Memory usage: ~1-2GB RAM for 1B model                      ║"
           echo "║                                                                   ║"
           echo "╚═══════════════════════════════════════════════════════════════════╝"
           echo ""
@@ -259,17 +975,12 @@ jobs:
         run: |
           echo ""
           echo "═══════════════════════════════════════════════════════════════════"
-          echo "  🔗  ACCESS YOUR METUBE INSTANCE:"
+          echo "  🔗  ACCESS YOUR LLAMA WEB UI:"
           echo "  📌  ${{ env.TUNNEL_URL }}"
           echo "═══════════════════════════════════════════════════════════════════"
           echo ""
-          echo "  🎬  This MeTube instance uses the same bypass as Youtube Downloader:"
-          echo "     • WARP VPN for IP/rate limit bypass"
-          echo "     • Deno.js for JavaScript execution"
-          echo "     • Multiple clients for YouTube API"
-          echo "     • No cookies required!"
-          echo ""
-          echo "  📁  Downloads: ./downloads (ephemeral)"
+          echo "  🦙  Model: ${{ github.event.inputs.model }}"
+          echo "  📝  Context: ${{ github.event.inputs.context_size }} tokens"
           echo "  ⏱️  Available for: ~6 hours"
           echo ""
 
@@ -283,16 +994,12 @@ jobs:
           echo ""
           echo "  🔍 Look for 'trycloudflare.com' in the logs above"
           echo "  📝 The URL format is: https://[random-words].trycloudflare.com"
-          echo ""
-          echo "  💡 If you see 'trycloudflare.com' in the logs, copy that URL"
-          echo "     and open it in your browser."
-          echo ""
 
-      - name: Cleanup
+      - name: 🧹 Cleanup
         if: always()
         run: |
-          echo "🧹 Cleaning up containers..."
-          docker compose down 2>/dev/null || true
-          docker stop warp 2>/dev/null || true
-          docker rm warp 2>/dev/null || true
+          echo "🧹 Cleaning up..."
+          docker stop $(docker ps -aq) 2>/dev/null || true
+          pkill -f "cloudflared" 2>/dev/null || true
+          pkill -f "python ollama_server" 2>/dev/null || true
           echo "✅ Cleanup complete"
