@@ -1,4 +1,4 @@
-name: Run MeTube with TryCloudflare
+name: MeTube with Cloudflare Tunnel
 
 on:
   workflow_dispatch:
@@ -8,107 +8,144 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Create docker-compose.yml
+      - name: Start MeTube Container
         run: |
-          cat > docker-compose.yml << 'EOF'
-          services:
-            metube:
-              image: ghcr.io/alexta69/metube:latest
-              container_name: metube
-              restart: unless-stopped
-              ports:
-                - "8081:8081"
-              volumes:
-                - ./downloads:/downloads
-              environment:
-                - TZ=UTC
-                - HOST=0.0.0.0
-                - MAX_CONCURRENT_DOWNLOADS=3
-                - DEFAULT_THEME=dark
-                - LOGLEVEL=INFO
-          EOF
-
-      - name: Start MeTube
-        run: |
-          docker compose up -d
-          echo "Waiting for MeTube to start..."
-          sleep 5
+          echo "🚀 Starting MeTube..."
+          docker run -d \
+            --name metube \
+            --restart unless-stopped \
+            -p 8081:8081 \
+            -e HOST=0.0.0.0 \
+            -e MAX_CONCURRENT_DOWNLOADS=3 \
+            -e DEFAULT_THEME=dark \
+            -e LOGLEVEL=INFO \
+            ghcr.io/alexta69/metube:latest
+          
+          # Wait for MeTube to be ready
+          echo "⏳ Waiting for MeTube to start..."
+          for i in {1..10}; do
+            if docker logs metube 2>&1 | grep -q "Listening on"; then
+              echo "✅ MeTube is ready!"
+              break
+            fi
+            sleep 2
+          done
+          
+          # Show MeTube is running
+          docker ps | grep metube
           docker logs metube
 
       - name: Install cloudflared
         run: |
-          curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o cloudflared
+          echo "📦 Installing cloudflared..."
+          curl -L -s https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o cloudflared
           chmod +x cloudflared
           sudo mv cloudflared /usr/local/bin/
+          cloudflared --version
 
-      - name: Run tunnel and capture URL
+      - name: Create Tunnel and Display URL
         id: tunnel
         run: |
-          # Start cloudflared in background
-          cloudflared tunnel --url http://127.0.0.1:8081 --protocol http2 2>&1 | tee cloudflared.log &
-          CLOUDFLARED_PID=$!
+          echo "🌐 Creating Cloudflare tunnel..."
           
-          # Wait for the URL pattern (more flexible pattern)
-          echo "Waiting for tunnel URL..."
-          TIMEOUT=45
+          # Start tunnel in background with logging
+          cloudflared tunnel --url http://127.0.0.1:8081 --protocol http2 2>&1 | tee tunnel.log &
+          TUNNEL_PID=$!
+          
+          # Extract URL with robust pattern matching
+          echo "⏳ Waiting for tunnel URL..."
           TUNNEL_URL=""
+          COUNTER=0
           
-          while [ $TIMEOUT -gt 0 ]; do
-            if grep -q "trycloudflare.com" cloudflared.log; then
-              # Try multiple patterns to extract URL
-              TUNNEL_URL=$(grep -E 'https://[a-zA-Z0-9-]+\.trycloudflare\.com' cloudflared.log | head -1 | grep -oE 'https://[a-zA-Z0-9-]+\.trycloudflare\.com')
-              if [ -n "$TUNNEL_URL" ]; then
-                echo "TUNNEL_URL=$TUNNEL_URL" >> $GITHUB_OUTPUT
-                echo "✅ Tunnel URL: $TUNNEL_URL"
-                break
+          while [ -z "$TUNNEL_URL" ] && [ $COUNTER -lt 60 ]; do
+            if [ -f tunnel.log ]; then
+              # Try multiple patterns to catch the URL
+              TUNNEL_URL=$(grep -oE 'https://[a-zA-Z0-9-]+\.trycloudflare\.com' tunnel.log 2>/dev/null | head -1)
+              if [ -z "$TUNNEL_URL" ]; then
+                TUNNEL_URL=$(grep -oE 'https://[^ ]+\.trycloudflare\.com' tunnel.log 2>/dev/null | head -1)
+              fi
+              if [ -z "$TUNNEL_URL" ]; then
+                TUNNEL_URL=$(grep -oE 'trycloudflare\.com' tunnel.log 2>/dev/null | head -1)
+                if [ -n "$TUNNEL_URL" ]; then
+                  # Extract from the line if we found the domain
+                  TUNNEL_URL=$(grep "trycloudflare.com" tunnel.log | grep -oE 'https://[a-zA-Z0-9-]+\.trycloudflare\.com' | head -1)
+                fi
               fi
             fi
             sleep 2
-            TIMEOUT=$((TIMEOUT-2))
+            COUNTER=$((COUNTER + 2))
           done
           
-          if [ -z "$TUNNEL_URL" ]; then
-            echo "❌ Failed to get tunnel URL, showing log:"
-            cat cloudflared.log
-            # Don't exit, just continue
+          # Save URL for later steps
+          if [ -n "$TUNNEL_URL" ]; then
+            echo "TUNNEL_URL=$TUNNEL_URL" >> $GITHUB_ENV
+            echo "TUNNEL_URL=$TUNNEL_URL" >> $GITHUB_OUTPUT
+            echo "✅ Tunnel URL captured: $TUNNEL_URL"
+          else
+            echo "⚠️ Could not auto-capture URL, check logs below:"
+            cat tunnel.log
           fi
           
-          echo "🔄 Tunnel is running. Press Ctrl+C to stop."
-          echo "📋 URL: $TUNNEL_URL"
-          echo "⏱️  This will run for up to 6 hours"
+          # Display beautiful banner with URL
           echo ""
-          echo "⚠️  IMPORTANT: This tunnel is temporary and public!"
+          echo "╔══════════════════════════════════════════════════════════════╗"
+          echo "║                                                              ║"
+          echo "║         🎉 M e T u b e   i s   R e a d y ! 🎉               ║"
+          echo "║                                                              ║"
+          echo "╠══════════════════════════════════════════════════════════════╣"
+          echo "║                                                              ║"
+          if [ -n "$TUNNEL_URL" ]; then
+            echo "║  🔗 Tunnel URL: $TUNNEL_URL"
+          else
+            echo "║  ⚠️ Check logs above for the tunnel URL"
+          fi
+          echo "║                                                              ║"
+          echo "╠══════════════════════════════════════════════════════════════╣"
+          echo "║                                                              ║"
+          echo "║  ⏱️  Tunnel expires in: ~6 hours (GitHub Action limit)      ║"
+          echo "║  📁 Downloads: Ephemeral (deleted when workflow stops)     ║"
+          echo "║  🌐 Public: Anyone with URL can access                    ║"
+          echo "║                                                              ║"
+          echo "║  🛑 To stop: Cancel workflow in GitHub Actions tab         ║"
+          echo "║                                                              ║"
+          echo "╚══════════════════════════════════════════════════════════════╝"
+          echo ""
+          echo "💡 Tip: Bookmark this URL or copy it now!"
           echo ""
           
-          # Keep running
-          wait $CLOUDFLARED_PID
+          # Keep the tunnel running
+          echo "🔄 Tunnel is running. Press Ctrl+C to stop."
+          wait $TUNNEL_PID
 
-      - name: Display tunnel URL
-        if: always() && steps.tunnel.outputs.TUNNEL_URL != ''
+      - name: Display URL (if workflow continues)
+        if: always() && env.TUNNEL_URL != ''
         run: |
-          echo "========================================="
-          echo "🔗 TUNNEL URL: ${{ steps.tunnel.outputs.TUNNEL_URL }}"
-          echo "========================================="
           echo ""
-          echo "⚠️  This URL is only valid while this workflow is running."
+          echo "═══════════════════════════════════════════════════════════════════"
+          echo "  🔗  ACCESS YOUR METUBE INSTANCE AT:"
+          echo "  📌  ${{ env.TUNNEL_URL }}"
+          echo "═══════════════════════════════════════════════════════════════════"
           echo ""
-          echo "📁 Downloads are stored in: ./downloads (ephemeral)"
+          echo "  ⚠️  This URL is temporary and will expire when this workflow stops"
+          echo "  📂  Downloads are in: ./downloads (deleted after workflow ends)"
+          echo "  🔒  No authentication - anyone with the URL can access"
           echo ""
-          echo "🛑 To stop: Cancel this workflow from GitHub Actions tab"
+          echo "  🛑  To stop: https://github.com/${{ github.repository }}/actions"
+          echo ""
 
-      - name: Show error if tunnel failed
-        if: always() && steps.tunnel.outputs.TUNNEL_URL == ''
+      - name: Fallback - Show URL from logs
+        if: failure() || env.TUNNEL_URL == ''
         run: |
-          echo "========================================="
-          echo "❌ TUNNEL CREATION FAILED"
-          echo "========================================="
           echo ""
-          echo "The tunnel was created but the URL couldn't be captured."
-          echo "Check the logs above for the URL, or try:"
+          echo "═══════════════════════════════════════════════════════════════════"
+          echo "  ⚠️  AUTO-EXTRACTION FAILED - FIND URL MANUALLY"
+          echo "═══════════════════════════════════════════════════════════════════"
           echo ""
-          echo "1. Check cloudflared.log in the workflow run"
-          echo "2. Look for lines containing 'trycloudflare.com'"
-          echo "3. Copy the URL manually from the logs"
+          echo "  🔍 Look for 'trycloudflare.com' in the logs above"
+          echo "  📝 The URL format is: https://[random-words].trycloudflare.com"
+          echo ""
+          echo "  📋 Search for lines containing:"
+          echo "     - 'Your quick Tunnel has been created'"
+          echo "     - 'trycloudflare.com'"
+          echo ""
+          echo "═══════════════════════════════════════════════════════════════════"
