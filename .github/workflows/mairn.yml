@@ -28,7 +28,6 @@ jobs:
           echo "⏳ Waiting for WARP to initialize..."
           sleep 20
           
-          # Verify WARP is working
           echo "🔎 Verifying WARP connection..."
           for i in {1..8}; do
             RESULT=$(curl -s --max-time 5 --socks5-hostname 127.0.0.1:1080 https://cloudflare.com/cdn-cgi/trace 2>/dev/null || echo "failed")
@@ -44,18 +43,15 @@ jobs:
         run: |
           echo "📦 Installing Deno.js..."
           
-          # Install Deno
           curl -fsSL https://deno.land/install.sh | sh
           export DENO_INSTALL="$HOME/.deno"
           export PATH="$DENO_INSTALL/bin:$PATH"
           echo "DENO_INSTALL=$DENO_INSTALL" >> $GITHUB_ENV
           echo "$DENO_INSTALL/bin" >> $GITHUB_PATH
           
-          # Verify Deno
           deno --version
           echo "✅ Deno.js installed"
           
-          # Install yt-dlp
           echo "📦 Installing yt-dlp..."
           sudo apt-get update -qq
           sudo apt-get install -y -qq python3-pip ffmpeg
@@ -63,7 +59,7 @@ jobs:
           yt-dlp --version
           echo "✅ yt-dlp installed"
 
-      - name: Create MeTube Docker Compose with Full Bypass
+      - name: Create docker-compose with FULL BYPASS
         run: |
           cat > docker-compose.yml << 'EOF'
           services:
@@ -81,32 +77,7 @@ jobs:
                 - MAX_CONCURRENT_DOWNLOADS=5
                 - DEFAULT_THEME=dark
                 - LOGLEVEL=INFO
-                # FULL BYPASS: Deno.js + WARP Proxy + Cookies + PO Token
-                - YTDL_OPTIONS={
-                    "proxy": "socks5://host.docker.internal:1080",
-                    "extractor_args": {
-                      "youtube": {
-                        "player_client": ["web", "mweb", "android", "android_vr"],
-                        "skip": ["hls", "dash"]
-                      }
-                    },
-                    "js_runtimes": "deno",
-                    "remote_components": "ejs:github",
-                    "writesubtitles": true,
-                    "subtitleslangs": ["en", "fa"],
-                    "writeautomaticsub": true,
-                    "updatetime": false,
-                    "cookiefile": "/downloads/cookies.txt",
-                    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-                    "add_headers": {
-                      "Accept-Language": "en-US,en;q=0.9",
-                      "Accept-Encoding": "gzip, deflate, br"
-                    },
-                    "sleep_interval": 10,
-                    "max_sleep_interval": 30,
-                    "retries": 20,
-                    "fragment_retries": 20
-                  }
+                - YTDL_OPTIONS={"proxy":"socks5://host.docker.internal:1080","extractor_args":{"youtube":{"player_client":["web","mweb","android","android_vr"],"skip":["hls","dash"]}},"js_runtimes":"deno","remote_components":"ejs:github","writesubtitles":true,"subtitleslangs":["en","fa"],"writeautomaticsub":true,"updatetime":false,"cookiefile":"/downloads/cookies.txt","user_agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36","add_headers":{"Accept-Language":"en-US,en;q=0.9","Accept-Encoding":"gzip, deflate, br"},"sleep_interval":10,"max_sleep_interval":30,"retries":20,"fragment_retries":20}
           EOF
 
       - name: Start MeTube
@@ -117,15 +88,14 @@ jobs:
           docker logs metube
           echo "✅ MeTube is running!"
 
-      - name: Verify MeTube can access YouTube via Deno+WARP
+      - name: Test YouTube Access via Deno+WARP
         run: |
           echo "🔎 Testing YouTube access via Deno+WARP..."
           
-          # Test using yt-dlp with Deno.js and WARP proxy
           docker exec metube sh -c "
             export DENO_INSTALL=/root/.deno
             export PATH=\$DENO_INSTALL/bin:\$PATH
-            deno --version || echo 'Deno not found in container'
+            deno --version || echo 'Deno not found'
             
             yt-dlp \
               --proxy socks5://host.docker.internal:1080 \
@@ -135,8 +105,8 @@ jobs:
               --dump-json --skip-download \
               --no-warnings \
               'https://www.youtube.com/watch?v=dQw4w9WgXcQ' \
-              | head -50
-          " || echo "⚠️ Test completed with some errors"
+              2>&1 | head -30
+          " || echo "⚠️ Test completed"
 
       - name: Install cloudflared
         run: |
@@ -151,11 +121,9 @@ jobs:
         run: |
           echo "🌐 Creating Cloudflare tunnel..."
           
-          # Start tunnel in background
           cloudflared tunnel --url http://127.0.0.1:8081 --protocol http2 2>&1 | tee tunnel.log &
           TUNNEL_PID=$!
           
-          # Extract URL
           echo "⏳ Waiting for tunnel URL..."
           TUNNEL_URL=""
           COUNTER=0
@@ -188,9 +156,8 @@ jobs:
           echo "║                                                                   ║"
           echo "╠═══════════════════════════════════════════════════════════════════╣"
           echo "║  🌐  WARP VPN      → Active (bypasses IP blocks)                 ║"
-          echo "║  🦕  Deno.js       → Active (JavaScript runtime for yt-dlp)      ║"
-          echo "║  🍪  Cookie Bypass → Enabled (auto-extracts from browser)        ║"
-          echo "║  🔑  PO Token      → Supported (via Deno.js)                     ║"
+          echo "║  🦕  Deno.js       → Active (JavaScript runtime)                 ║"
+          echo "║  🍪  Cookie Bypass → Supported (upload in UI)                    ║"
           echo "║                                                                   ║"
           echo "╠═══════════════════════════════════════════════════════════════════╣"
           echo "║  📌  TO DOWNLOAD VIDEOS:                                         ║"
@@ -206,11 +173,7 @@ jobs:
           echo "║                                                                   ║"
           echo "╚═══════════════════════════════════════════════════════════════════╝"
           echo ""
-          echo "⏱️  Tunnel expires in ~6 hours (GitHub Action limit)"
-          echo "📁 Downloads: ./downloads (ephemeral)"
-          echo ""
           
-          # Keep tunnel running
           wait $TUNNEL_PID
 
       - name: Display Final URL
@@ -224,11 +187,10 @@ jobs:
           echo ""
           echo "  🦕  Deno.js is active - YouTube JavaScript is fully processed"
           echo "  🌐  WARP VPN is active - IP blocks are bypassed"
-          echo "  🍪  Cookie bypass is active - can extract from browser"
+          echo "  🍪  Cookie bypass is supported - upload via UI"
           echo ""
           echo "  📁  Downloads: ./downloads (ephemeral)"
           echo "  ⏱️  Available for: ~6 hours"
-          echo ""
 
       - name: Show error if tunnel failed
         if: failure() || env.TUNNEL_URL == ''
@@ -240,9 +202,8 @@ jobs:
           echo ""
           echo "  🔍 Look for 'trycloudflare.com' in the logs above"
           echo "  📝 The URL format is: https://[random-words].trycloudflare.com"
-          echo ""
 
-      - name: Cleanup on exit
+      - name: Cleanup
         if: always()
         run: |
           docker compose down 2>/dev/null || true
