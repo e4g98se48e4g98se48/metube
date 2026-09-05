@@ -1,18 +1,19 @@
 name: Run MeTube with TryCloudflare
 
 on:
-  workflow_dispatch: # Allows you to run it manually from GitHub Actions tab
+  workflow_dispatch: # Manual trigger only
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Create docker-compose.yml
         run: |
-          cat > docker-compose.yml << EOF
+          cat > docker-compose.yml << 'EOF'
           services:
             metube:
               image: ghcr.io/alexta69/metube:latest
@@ -24,13 +25,22 @@ jobs:
                 - ./downloads:/downloads
               environment:
                 - TZ=UTC
-                # You can add more environment variables here, e.g.:
-                # - MAX_CONCURRENT_DOWNLOADS=3
-                # - DEFAULT_THEME=dark
+                - HOST=0.0.0.0
+                - MAX_CONCURRENT_DOWNLOADS=3
+                - DEFAULT_THEME=dark
+                - LOGLEVEL=INFO
+                # Uncomment for audio-only downloads folder
+                # - AUDIO_DOWNLOAD_DIR=/downloads/audio
+                # Uncomment for custom yt-dlp options
+                # - YTDL_OPTIONS={"writesubtitles": true, "subtitleslangs": ["en"], "updatetime": false}
           EOF
 
       - name: Start MeTube
-        run: docker compose up -d
+        run: |
+          docker compose up -d
+          echo "Waiting for MeTube to start..."
+          sleep 5
+          docker logs metube
 
       - name: Install cloudflared
         run: |
@@ -38,6 +48,60 @@ jobs:
           chmod +x cloudflared
           sudo mv cloudflared /usr/local/bin/
 
-      - name: Run cloudflared tunnel to MeTube
+      - name: Get tunnel URL and keep it running
+        id: tunnel
         run: |
-          cloudflared tunnel --url http://localhost:8081 --protocol http2
+          # Run cloudflared in background and capture URL
+          cloudflared tunnel --url http://127.0.0.1:8081 --protocol http2 2>&1 | tee cloudflared.log &
+          CLOUDFLARED_PID=$!
+          
+          # Wait for URL to appear in logs
+          echo "Waiting for tunnel URL..."
+          TIMEOUT=30
+          while [ $TIMEOUT -gt 0 ]; do
+            if grep -q "trycloudflare.com" cloudflared.log; then
+              TUNNEL_URL=$(grep -o 'https://[a-zA-Z0-9-]*\.trycloudflare\.com' cloudflared.log | head -1)
+              echo "TUNNEL_URL=$TUNNEL_URL" >> $GITHUB_OUTPUT
+              echo "✅ Tunnel URL: $TUNNEL_URL"
+              break
+            fi
+            sleep 2
+            TIMEOUT=$((TIMEOUT-2))
+          done
+          
+          if [ -z "$TUNNEL_URL" ]; then
+            echo "❌ Failed to get tunnel URL within timeout"
+            cat cloudflared.log
+            exit 1
+          fi
+          
+          # Keep the tunnel running
+          echo "🔄 Tunnel is running. Press Ctrl+C to stop."
+          echo "📋 URL: $TUNNEL_URL"
+          echo "⏱️  This will run for up to 6 hours (GitHub Action limit)"
+          echo ""
+          echo "⚠️  IMPORTANT: This tunnel is temporary and public!"
+          echo "   Anyone with the URL can access your MeTube instance."
+          echo ""
+          echo "💡 To stop: Cancel this workflow from GitHub Actions tab"
+          
+          # Wait for the cloudflared process
+          wait $CLOUDFLARED_PID
+
+      - name: Display tunnel URL (if workflow continues)
+        if: always()
+        run: |
+          echo "========================================="
+          echo "🔗 TUNNEL URL: ${{ steps.tunnel.outputs.TUNNEL_URL }}"
+          echo "========================================="
+          echo ""
+          echo "⚠️  This URL is only valid while this workflow is running."
+          echo "   The workflow will automatically stop after 6 hours."
+          echo ""
+          echo "📁 Downloads are stored in: ./downloads (ephemeral)"
+          echo "   They will be deleted when the workflow stops."
+          echo ""
+          echo "🛑 To stop the tunnel:"
+          echo "   1. Go to GitHub Actions tab"
+          echo "   2. Click on this workflow run"
+          echo "   3. Click 'Cancel workflow'"
