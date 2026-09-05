@@ -1,7 +1,7 @@
 name: Run MeTube with TryCloudflare
 
 on:
-  workflow_dispatch: # Manual trigger only
+  workflow_dispatch:
 
 jobs:
   deploy:
@@ -29,10 +29,6 @@ jobs:
                 - MAX_CONCURRENT_DOWNLOADS=3
                 - DEFAULT_THEME=dark
                 - LOGLEVEL=INFO
-                # Uncomment for audio-only downloads folder
-                # - AUDIO_DOWNLOAD_DIR=/downloads/audio
-                # Uncomment for custom yt-dlp options
-                # - YTDL_OPTIONS={"writesubtitles": true, "subtitleslangs": ["en"], "updatetime": false}
           EOF
 
       - name: Start MeTube
@@ -48,60 +44,71 @@ jobs:
           chmod +x cloudflared
           sudo mv cloudflared /usr/local/bin/
 
-      - name: Get tunnel URL and keep it running
+      - name: Run tunnel and capture URL
         id: tunnel
         run: |
-          # Run cloudflared in background and capture URL
+          # Start cloudflared in background
           cloudflared tunnel --url http://127.0.0.1:8081 --protocol http2 2>&1 | tee cloudflared.log &
           CLOUDFLARED_PID=$!
           
-          # Wait for URL to appear in logs
+          # Wait for the URL pattern (more flexible pattern)
           echo "Waiting for tunnel URL..."
-          TIMEOUT=30
+          TIMEOUT=45
+          TUNNEL_URL=""
+          
           while [ $TIMEOUT -gt 0 ]; do
             if grep -q "trycloudflare.com" cloudflared.log; then
-              TUNNEL_URL=$(grep -o 'https://[a-zA-Z0-9-]*\.trycloudflare\.com' cloudflared.log | head -1)
-              echo "TUNNEL_URL=$TUNNEL_URL" >> $GITHUB_OUTPUT
-              echo "✅ Tunnel URL: $TUNNEL_URL"
-              break
+              # Try multiple patterns to extract URL
+              TUNNEL_URL=$(grep -E 'https://[a-zA-Z0-9-]+\.trycloudflare\.com' cloudflared.log | head -1 | grep -oE 'https://[a-zA-Z0-9-]+\.trycloudflare\.com')
+              if [ -n "$TUNNEL_URL" ]; then
+                echo "TUNNEL_URL=$TUNNEL_URL" >> $GITHUB_OUTPUT
+                echo "✅ Tunnel URL: $TUNNEL_URL"
+                break
+              fi
             fi
             sleep 2
             TIMEOUT=$((TIMEOUT-2))
           done
           
           if [ -z "$TUNNEL_URL" ]; then
-            echo "❌ Failed to get tunnel URL within timeout"
+            echo "❌ Failed to get tunnel URL, showing log:"
             cat cloudflared.log
-            exit 1
+            # Don't exit, just continue
           fi
           
-          # Keep the tunnel running
           echo "🔄 Tunnel is running. Press Ctrl+C to stop."
           echo "📋 URL: $TUNNEL_URL"
-          echo "⏱️  This will run for up to 6 hours (GitHub Action limit)"
+          echo "⏱️  This will run for up to 6 hours"
           echo ""
           echo "⚠️  IMPORTANT: This tunnel is temporary and public!"
-          echo "   Anyone with the URL can access your MeTube instance."
           echo ""
-          echo "💡 To stop: Cancel this workflow from GitHub Actions tab"
           
-          # Wait for the cloudflared process
+          # Keep running
           wait $CLOUDFLARED_PID
 
-      - name: Display tunnel URL (if workflow continues)
-        if: always()
+      - name: Display tunnel URL
+        if: always() && steps.tunnel.outputs.TUNNEL_URL != ''
         run: |
           echo "========================================="
           echo "🔗 TUNNEL URL: ${{ steps.tunnel.outputs.TUNNEL_URL }}"
           echo "========================================="
           echo ""
           echo "⚠️  This URL is only valid while this workflow is running."
-          echo "   The workflow will automatically stop after 6 hours."
           echo ""
           echo "📁 Downloads are stored in: ./downloads (ephemeral)"
-          echo "   They will be deleted when the workflow stops."
           echo ""
-          echo "🛑 To stop the tunnel:"
-          echo "   1. Go to GitHub Actions tab"
-          echo "   2. Click on this workflow run"
-          echo "   3. Click 'Cancel workflow'"
+          echo "🛑 To stop: Cancel this workflow from GitHub Actions tab"
+
+      - name: Show error if tunnel failed
+        if: always() && steps.tunnel.outputs.TUNNEL_URL == ''
+        run: |
+          echo "========================================="
+          echo "❌ TUNNEL CREATION FAILED"
+          echo "========================================="
+          echo ""
+          echo "The tunnel was created but the URL couldn't be captured."
+          echo "Check the logs above for the URL, or try:"
+          echo ""
+          echo "1. Check cloudflared.log in the workflow run"
+          echo "2. Look for lines containing 'trycloudflare.com'"
+          echo "3. Copy the URL manually from the logs"
