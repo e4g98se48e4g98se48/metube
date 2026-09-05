@@ -65,19 +65,19 @@ jobs:
             echo "⚠️  WARP might not be fully active, continuing anyway..."
           fi
 
-      - name: Build MeTube with Deno.js (FIXED)
+      - name: Build MeTube with Deno.js (FINAL FIX)
         run: |
           echo "──────────────────────────────────────────"
           echo " 🔨  BUILD  ·  Creating MeTube with Deno"
           echo "──────────────────────────────────────────"
           
-          # Create Dockerfile with Deno.js - FIXED: Don't switch to metube user before verifying
+          # Create Dockerfile with Deno.js - FINAL FIX: Run everything as root
           cat > Dockerfile.metube << 'EOF'
           FROM ghcr.io/alexta69/metube:latest
           
           USER root
           
-          # Install Deno.js (like in Youtube Downloader)
+          # Install Deno.js
           RUN apt-get update && apt-get install -y curl unzip && \
               curl -fsSL https://deno.land/install.sh | sh && \
               export DENO_INSTALL="/root/.deno" && \
@@ -91,11 +91,11 @@ jobs:
           # Install latest yt-dlp
           RUN pip3 install --upgrade yt-dlp
           
-          # Verify Deno is accessible (as root)
-          RUN /root/.deno/bin/deno --version || echo "Deno installed"
+          # Verify Deno is accessible
+          RUN /root/.deno/bin/deno --version
           
-          # Keep the container running with metube user
-          USER metube
+          # Stay as root to avoid user issues
+          USER root
           EOF
           
           # Build the custom image
@@ -114,6 +114,7 @@ jobs:
                 - "8081:8081"
               volumes:
                 - ./downloads:/downloads
+              user: root
               environment:
                 - TZ=UTC
                 - HOST=0.0.0.0
