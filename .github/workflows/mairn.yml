@@ -43,7 +43,7 @@ jobs:
         run: |
           echo "╔═══════════════════════════════════════════════════════════════════╗"
           echo "║                                                                   ║"
-          echo "║           🦙  L L A M A   1 B   W E B   U I                     ║"
+          echo "║            🦙  L L A M A   1 B   W E B   U I                      ║"
           echo "║                                                                   ║"
           echo "╚═══════════════════════════════════════════════════════════════════╝"
           echo ""
@@ -112,7 +112,7 @@ jobs:
           cat > ollama_server.py << 'EOF'
           #!/usr/bin/env python3
           """
-          🦙 Ollama Web Server - Single File Interface
+          🦙 Ollama Web Server - ChatGPT UI Styling with Full Markdown & Code Highlights
           """
           
           import json
@@ -142,9 +142,8 @@ jobs:
           MODEL_NAME = os.getenv("MODEL_NAME", "llama3.2:1b")
           PORT = int(os.getenv("PORT", "7860"))
           
-          app = FastAPI(title="🦙 Llama Web UI", description="Local LLM Interface")
+          app = FastAPI(title="🦙 Llama ChatGPT UI", description="Local LLM Interface")
           
-          # Request/Response Models
           class ChatMessage(BaseModel):
               role: str
               content: str
@@ -155,124 +154,243 @@ jobs:
               max_tokens: Optional[int] = 2048
               stream: Optional[bool] = False
           
-          class GenerateRequest(BaseModel):
-              prompt: str
-              temperature: Optional[float] = 0.7
-              max_tokens: Optional[int] = 2048
-              stream: Optional[bool] = False
-          
-          class ModelInfo(BaseModel):
-              name: str
-              size: str
-              modified: str
-          
-          # ================================================================
-          #  HTML UI Template
-          # ================================================================
           HTML_TEMPLATE = '''
           <!DOCTYPE html>
           <html lang="en">
           <head>
               <meta charset="UTF-8">
               <meta name="viewport" content="width=device-width, initial-scale=1.0">
-              <title>🦙 Llama Web UI</title>
+              <title>ChatGPT - Llama Local</title>
+              <!-- Marked.js for Markdown parsing -->
+              <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+              <!-- Highlight.js for Code Highlighting -->
+              <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+              <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
               <style>
+                  :root {
+                      --bg-sidebar: #202123;
+                      --bg-main: #343541;
+                      --bg-input: #40414f;
+                      --text-main: #ececf1;
+                      --text-secondary: #8e8ea0;
+                      --border-color: #4d4d4f;
+                      --user-bubble: #343541;
+                      --ai-bubble: #444654;
+                      --accent-green: #10a37f;
+                  }
                   * {
                       margin: 0;
                       padding: 0;
                       box-sizing: border-box;
                   }
                   body {
-                      background: #0d1117;
-                      color: #c9d1d9;
-                      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                      background: var(--bg-main);
+                      color: var(--text-main);
+                      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
                       height: 100vh;
                       display: flex;
+                      overflow: hidden;
+                  }
+                  .sidebar {
+                      width: 260px;
+                      background: var(--bg-sidebar);
+                      display: flex;
                       flex-direction: column;
-                  }
-                  .header {
-                      background: #161b22;
-                      border-bottom: 1px solid #30363d;
-                      padding: 16px 24px;
-                      display: flex;
-                      justify-content: space-between;
-                      align-items: center;
+                      padding: 10px;
+                      border-right: 1px solid var(--border-color);
                       flex-shrink: 0;
                   }
-                  .header h1 {
-                      font-size: 20px;
-                      font-weight: 600;
+                  .new-chat-btn {
                       display: flex;
                       align-items: center;
-                      gap: 10px;
-                  }
-                  .header .badge {
-                      background: #238636;
-                      color: #fff;
-                      padding: 2px 10px;
-                      border-radius: 12px;
-                      font-size: 12px;
-                  }
-                  .header .model-name {
-                      color: #8b949e;
+                      gap: 12px;
+                      width: 100%;
+                      padding: 12px;
+                      background: transparent;
+                      border: 1px solid var(--border-color);
+                      border-radius: 6px;
+                      color: var(--text-main);
                       font-size: 14px;
+                      cursor: pointer;
+                      text-align: left;
+                      transition: background 0.2s;
+                      margin-bottom: 10px;
                   }
-                  .status-bar {
-                      padding: 8px 24px;
-                      background: #0d1117;
-                      border-bottom: 1px solid #21262d;
+                  .new-chat-btn:hover {
+                      background: rgba(255, 255, 255, 0.05);
+                  }
+                  .sidebar-footer {
+                      margin-top: auto;
+                      border-top: 1px solid var(--border-color);
+                      padding-top: 10px;
                       font-size: 13px;
-                      color: #8b949e;
-                      flex-shrink: 0;
+                      color: var(--text-secondary);
                       display: flex;
-                      justify-content: space-between;
+                      flex-direction: column;
+                      gap: 6px;
                   }
-                  .status-bar .status-dot {
+                  .model-tag {
+                      background: rgba(16, 163, 127, 0.15);
+                      color: var(--accent-green);
+                      padding: 4px 8px;
+                      border-radius: 4px;
+                      font-size: 12px;
+                      font-weight: 500;
                       display: inline-block;
-                      width: 10px;
-                      height: 10px;
-                      border-radius: 50%;
-                      margin-right: 8px;
+                      width: fit-content;
                   }
-                  .status-bar .status-dot.online { background: #3fb950; }
-                  .status-bar .status-dot.offline { background: #da3633; }
-                  
+                  .main-content {
+                      flex: 1;
+                      display: flex;
+                      flex-direction: column;
+                      height: 100vh;
+                      position: relative;
+                  }
                   .chat-container {
                       flex: 1;
                       overflow-y: auto;
-                      padding: 24px;
                       display: flex;
                       flex-direction: column;
+                      padding-bottom: 120px;
+                  }
+                  .message-row {
+                      width: 100%;
+                      display: flex;
+                      justify-content: center;
+                      border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+                  }
+                  .message-row.user {
+                      background: var(--user-bubble);
+                  }
+                  .message-row.assistant {
+                      background: var(--ai-bubble);
+                  }
+                  .message-content {
+                      max-width: 768px;
+                      width: 100%;
+                      padding: 24px 16px;
+                      display: flex;
                       gap: 16px;
-                  }
-                  .message {
-                      max-width: 85%;
-                      padding: 12px 16px;
-                      border-radius: 12px;
-                      line-height: 1.6;
-                      word-wrap: break-word;
-                      white-space: pre-wrap;
-                  }
-                  .message.user {
-                      align-self: flex-end;
-                      background: #238636;
-                      color: #fff;
-                  }
-                  .message.assistant {
-                      align-self: flex-start;
-                      background: #21262d;
-                      border: 1px solid #30363d;
-                  }
-                  .message .role-label {
-                      font-size: 11px;
-                      font-weight: 600;
-                      opacity: 0.7;
-                      margin-bottom: 4px;
-                  }
-                  .message .content {
+                      line-height: 1.7;
                       font-size: 15px;
                   }
-                  .message .content .loading-dots::after {
+                  .avatar {
+                      width: 30px;
+                      height: 30px;
+                      border-radius: 2px;
+                      display: flex;
+                      align-items: center;
+                      justify-content: center;
+                      font-size: 16px;
+                      flex-shrink: 0;
+                  }
+                  .avatar.user { background: #5436da; color: #fff; }
+                  .avatar.assistant { background: var(--accent-green); color: #fff; }
+                  .text-body {
+                      flex: 1;
+                      overflow-x: auto;
+                  }
+                  
+                  /* Markdown Custom Styling */
+                  .text-body p { margin-bottom: 12px; }
+                  .text-body p:last-child { margin-bottom: 0; }
+                  .text-body pre {
+                      background: #1e1e1e;
+                      padding: 12px;
+                      border-radius: 8px;
+                      overflow-x: auto;
+                      margin: 12px 0;
+                      border: 1px solid var(--border-color);
+                  }
+                  .text-body code {
+                      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+                      font-size: 13px;
+                      background: rgba(0,0,0,0.2);
+                      padding: 2px 4px;
+                      border-radius: 4px;
+                  }
+                  .text-body pre code {
+                      background: transparent;
+                      padding: 0;
+                  }
+                  .text-body ul, .text-body ol {
+                      padding-left: 20px;
+                      margin-bottom: 12px;
+                  }
+                  .text-body blockquote {
+                      border-left: 3px solid var(--accent-green);
+                      padding-left: 10px;
+                      color: var(--text-secondary);
+                      margin: 12px 0;
+                  }
+                  .text-body table {
+                      width: 100%;
+                      border-collapse: collapse;
+                      margin: 12px 0;
+                  }
+                  .text-body th, .text-body td {
+                      border: 1px solid var(--border-color);
+                      padding: 8px 12px;
+                      text-align: left;
+                  }
+                  .text-body th {
+                      background: rgba(255,255,255,0.05);
+                  }
+
+                  .input-container {
+                      position: absolute;
+                      bottom: 0;
+                      left: 0;
+                      width: 100%;
+                      background: linear-gradient(180deg, rgba(53,53,65,0) 0%, var(--bg-main) 50%);
+                      padding: 24px;
+                      display: flex;
+                      justify-content: center;
+                  }
+                  .input-box-wrapper {
+                      max-width: 768px;
+                      width: 100%;
+                      background: var(--bg-input);
+                      border: 1px solid var(--border-color);
+                      border-radius: 12px;
+                      box-shadow: 0 0 15px rgba(0,0,0,0.1);
+                      display: flex;
+                      align-items: flex-end;
+                      padding: 10px 14px;
+                      gap: 10px;
+                  }
+                  .input-box-wrapper textarea {
+                      flex: 1;
+                      background: transparent;
+                      border: none;
+                      color: var(--text-main);
+                      font-family: inherit;
+                      font-size: 15px;
+                      resize: none;
+                      outline: none;
+                      max-height: 200px;
+                      min-height: 24px;
+                      line-height: 24px;
+                  }
+                  .send-btn {
+                      background: var(--accent-green);
+                      border: none;
+                      border-radius: 6px;
+                      width: 32px;
+                      height: 32px;
+                      display: flex;
+                      align-items: center;
+                      justify-content: center;
+                      color: white;
+                      cursor: pointer;
+                      transition: opacity 0.2s;
+                      flex-shrink: 0;
+                  }
+                  .send-btn:disabled {
+                      opacity: 0.3;
+                      cursor: not-allowed;
+                  }
+                  .loading-dots::after {
                       content: '...';
                       animation: dots 1.5s steps(4, end) infinite;
                   }
@@ -282,285 +400,173 @@ jobs:
                       50% { content: '..'; }
                       75% { content: '...'; }
                   }
-                  
-                  .input-area {
-                      background: #161b22;
-                      border-top: 1px solid #30363d;
-                      padding: 16px 24px;
-                      flex-shrink: 0;
+                  .settings-panel {
+                      padding: 10px 0;
                       display: flex;
-                      gap: 12px;
-                  }
-                  .input-area textarea {
-                      flex: 1;
-                      background: #0d1117;
-                      border: 1px solid #30363d;
-                      border-radius: 8px;
-                      color: #c9d1d9;
-                      padding: 12px;
-                      font-family: inherit;
-                      font-size: 14px;
-                      resize: none;
-                      outline: none;
-                      min-height: 52px;
-                      max-height: 150px;
-                      transition: border-color 0.2s;
-                  }
-                  .input-area textarea:focus {
-                      border-color: #58a6ff;
-                  }
-                  .input-area textarea::placeholder {
-                      color: #484f58;
-                  }
-                  .input-area button {
-                      background: #238636;
-                      border: none;
-                      border-radius: 8px;
-                      color: #fff;
-                      padding: 0 24px;
-                      font-weight: 600;
-                      font-size: 14px;
-                      cursor: pointer;
-                      transition: background 0.2s;
-                      white-space: nowrap;
-                      min-height: 52px;
-                  }
-                  .input-area button:hover {
-                      background: #2ea043;
-                  }
-                  .input-area button:disabled {
-                      opacity: 0.5;
-                      cursor: not-allowed;
-                  }
-                  
-                  .settings-row {
-                      padding: 8px 24px;
-                      background: #0d1117;
-                      border-bottom: 1px solid #21262d;
-                      display: flex;
-                      gap: 16px;
-                      flex-wrap: wrap;
-                      align-items: center;
-                      flex-shrink: 0;
+                      flex-direction: column;
+                      gap: 8px;
                       font-size: 13px;
+                      color: var(--text-secondary);
                   }
-                  .settings-row label {
+                  .settings-panel label {
                       display: flex;
+                      justify-content: space-between;
                       align-items: center;
-                      gap: 6px;
-                      color: #8b949e;
                   }
-                  .settings-row input[type="range"] {
-                      width: 100px;
-                      background: #21262d;
-                      height: 4px;
-                      -webkit-appearance: none;
-                  }
-                  .settings-row input[type="range"]::-webkit-slider-thumb {
-                      -webkit-appearance: none;
-                      width: 14px;
-                      height: 14px;
-                      border-radius: 50%;
-                      background: #58a6ff;
-                      cursor: pointer;
-                  }
-                  .settings-row .value {
-                      color: #c9d1d9;
-                      font-weight: 600;
-                      min-width: 30px;
-                  }
-                  
-                  .footer {
-                      padding: 8px 24px;
-                      text-align: center;
-                      font-size: 12px;
-                      color: #484f58;
-                      border-top: 1px solid #21262d;
-                      flex-shrink: 0;
-                  }
-                  
-                  /* Scrollbar */
-                  .chat-container::-webkit-scrollbar {
-                      width: 8px;
-                  }
-                  .chat-container::-webkit-scrollbar-track {
-                      background: #0d1117;
-                  }
-                  .chat-container::-webkit-scrollbar-thumb {
-                      background: #30363d;
-                      border-radius: 4px;
-                  }
-                  .chat-container::-webkit-scrollbar-thumb:hover {
-                      background: #484f58;
-                  }
-                  
-                  @media (max-width: 640px) {
-                      .header { flex-wrap: wrap; gap: 8px; }
-                      .input-area { flex-wrap: wrap; }
-                      .input-area textarea { min-height: 44px; }
-                      .input-area button { min-height: 44px; padding: 0 16px; }
-                      .message { max-width: 95%; }
+                  .settings-panel input[type="range"] {
+                      width: 120px;
                   }
               </style>
           </head>
           <body>
-              <div class="header">
-                  <h1>
-                      🦙 Llama Web UI
-                      <span class="badge">Local</span>
-                  </h1>
-                  <span class="model-name">📦 {{ model_name }}</span>
-              </div>
-              
-              <div class="status-bar">
-                  <span>
-                      <span class="status-dot online" id="statusDot"></span>
-                      <span id="statusText">Ollama Online</span>
-                  </span>
-                  <span id="tokenCount">Tokens: 0</span>
-              </div>
-              
-              <div class="settings-row">
-                  <label>
-                      🌡️ Temperature
-                      <input type="range" id="temperature" min="0" max="2" step="0.1" value="0.7">
-                      <span class="value" id="tempValue">0.7</span>
-                  </label>
-                  <label>
-                      📝 Max Tokens
-                      <input type="range" id="maxTokens" min="128" max="4096" step="128" value="2048">
-                      <span class="value" id="maxTokensValue">2048</span>
-                  </label>
-                  <label>
-                      <input type="checkbox" id="streamCheck" checked>
-                      Stream response
-                  </label>
-                  <button onclick="clearChat()" style="background:#21262d;border:1px solid #30363d;color:#c9d1d9;padding:4px 12px;border-radius:6px;cursor:pointer;font-size:13px;">
-                      🗑️ Clear
+              <div class="sidebar">
+                  <button class="new-chat-btn" onclick="clearChat()">
+                      <span>+</span> New chat
                   </button>
-              </div>
-              
-              <div class="chat-container" id="chatContainer">
-                  <div class="message assistant">
-                      <div class="role-label">🤖 Assistant</div>
-                      <div class="content">Hello! I'm running <strong>{{ model_name }}</strong> locally.<br>Ask me anything! 😊</div>
+                  <div class="settings-panel">
+                      <label>Temp: <span id="tempVal">0.7</span></label>
+                      <input type="range" id="temperature" min="0" max="2" step="0.1" value="0.7">
+                      <label>Tokens: <span id="tokenVal">2048</span></label>
+                      <input type="range" id="maxTokens" min="128" max="4096" step="128" value="2048">
+                  </div>
+                  <div class="sidebar-footer">
+                      <span class="model-tag">📦 {{ model_name }}</span>
+                      <span id="statusIndicator">🟢 Ollama Online</span>
+                      <span id="tokenCounter">Tokens consumed: 0</span>
                   </div>
               </div>
-              
-              <div class="input-area">
-                  <textarea id="userInput" placeholder="Type your message here..." rows="1"></textarea>
-                  <button id="sendButton" onclick="sendMessage()">🚀 Send</button>
+
+              <div class="main-content">
+                  <div class="chat-container" id="chatContainer">
+                      <div class="message-row assistant">
+                          <div class="message-content">
+                              <div class="avatar assistant">🦙</div>
+                              <div class="text-body" id="welcomeMsg"></div>
+                          </div>
+                      </div>
+                  </div>
+
+                  <div class="input-container">
+                      <div class="input-box-wrapper">
+                          <textarea id="userInput" placeholder="Send a message..." rows="1"></textarea>
+                          <button class="send-btn" id="sendButton" onclick="sendMessage()">⬆</button>
+                      </div>
+                  </div>
               </div>
-              
-              <div class="footer">
-                  🦙 Powered by Ollama • {{ model_name }} • {{ context_size }} context
-              </div>
-          
+
               <script>
-                  // ================================================================
-                  //  Chat Logic
-                  // ================================================================
+                  // Configure marked with highlight.js
+                  marked.setOptions({
+                      highlight: function(code, lang) {
+                          if (lang && hljs.getLanguage(lang)) {
+                              return hljs.highlight(code, { language: lang }).value;
+                          }
+                          return hljs.highlightAuto(code).value;
+                      },
+                      breaks: true
+                  });
+
+                  // Initialize welcome message markdown parsing
+                  document.getElementById('welcomeMsg').innerHTML = marked.parse("Hello! I'm running **{{ model_name }}** locally through your interface. How can I help you today?");
+
                   const chatContainer = document.getElementById('chatContainer');
                   const userInput = document.getElementById('userInput');
                   const sendButton = document.getElementById('sendButton');
-                  const statusText = document.getElementById('statusText');
-                  const statusDot = document.getElementById('statusDot');
-                  const tokenCount = document.getElementById('tokenCount');
+                  const tokenCounter = document.getElementById('tokenCounter');
                   let isStreaming = false;
                   let totalTokens = 0;
-                  
-                  // Auto-resize textarea
+
                   userInput.addEventListener('input', function() {
                       this.style.height = 'auto';
-                      this.style.height = Math.min(this.scrollHeight, 150) + 'px';
+                      this.style.height = Math.min(this.scrollHeight, 200) + 'px';
                   });
-                  
-                  // Enter to send
+
                   userInput.addEventListener('keydown', function(e) {
                       if (e.key === 'Enter' && !e.shiftKey) {
                           e.preventDefault();
                           sendMessage();
                       }
                   });
-                  
-                  // Temperature slider
+
                   document.getElementById('temperature').addEventListener('input', function() {
-                      document.getElementById('tempValue').textContent = this.value;
+                      document.getElementById('tempVal').textContent = this.value;
                   });
-                  
                   document.getElementById('maxTokens').addEventListener('input', function() {
-                      document.getElementById('maxTokensValue').textContent = this.value;
+                      document.getElementById('tokenVal').textContent = this.value;
                   });
-                  
-                  function addMessage(role, content, isStreaming = false) {
-                      const div = document.createElement('div');
-                      div.className = `message ${role}`;
+
+                  function appendMessage(role, content, isLoading = false) {
+                      const row = document.createElement('div');
+                      row.className = `message-row ${role}`;
                       
-                      const label = document.createElement('div');
-                      label.className = 'role-label';
-                      label.textContent = role === 'user' ? '👤 You' : '🤖 Assistant';
-                      
-                      const contentDiv = document.createElement('div');
-                      contentDiv.className = 'content';
-                      if (isStreaming) {
-                          contentDiv.innerHTML = content + '<span class="loading-dots"></span>';
+                      const msgContent = document.createElement('div');
+                      msgContent.className = 'message-content';
+
+                      const avatar = document.createElement('div');
+                      avatar.className = `avatar ${role}`;
+                      avatar.textContent = role === 'user' ? '👤' : '🦙';
+
+                      const textBody = document.createElement('div');
+                      textBody.className = 'text-body';
+                      if (isLoading) {
+                          textBody.innerHTML = marked.parse(content) + '<span class="loading-dots"></span>';
                       } else {
-                          contentDiv.textContent = content;
+                          textBody.innerHTML = marked.parse(content);
                       }
-                      
-                      div.appendChild(label);
-                      div.appendChild(contentDiv);
-                      chatContainer.appendChild(div);
+
+                      msgContent.appendChild(avatar);
+                      msgContent.appendChild(textBody);
+                      row.appendChild(msgContent);
+                      chatContainer.appendChild(row);
                       chatContainer.scrollTop = chatContainer.scrollHeight;
-                      return contentDiv;
+                      return textBody;
                   }
-                  
+
                   function updateLastMessage(content, isComplete = false) {
-                      const messages = chatContainer.querySelectorAll('.message.assistant');
-                      if (messages.length === 0) return;
-                      const lastMsg = messages[messages.length - 1];
-                      const contentDiv = lastMsg.querySelector('.content');
-                      if (contentDiv) {
+                      const rows = chatContainer.querySelectorAll('.message-row.assistant');
+                      if (rows.length === 0) return;
+                      const lastRow = rows[rows.length - 1];
+                      const textBody = lastRow.querySelector('.text-body');
+                      if (textBody) {
                           if (isComplete) {
-                              contentDiv.textContent = content;
+                              textBody.innerHTML = marked.parse(content);
+                              // Trigger syntax highlighting updates
+                              textBody.querySelectorAll('pre code').forEach((block) => {
+                                  hljs.highlightElement(block);
+                              });
                           } else {
-                              contentDiv.innerHTML = content + '<span class="loading-dots"></span>';
+                              textBody.innerHTML = marked.parse(content) + '<span class="loading-dots"></span>';
                           }
                           chatContainer.scrollTop = chatContainer.scrollHeight;
                       }
                   }
-                  
+
                   function clearChat() {
-                      // Keep only the first assistant message
-                      const messages = chatContainer.querySelectorAll('.message');
-                      for (let i = 1; i < messages.length; i++) {
-                          messages[i].remove();
+                      const rows = chatContainer.querySelectorAll('.message-row');
+                      for (let i = 1; i < rows.length; i++) {
+                          rows[i].remove();
                       }
                       totalTokens = 0;
-                      tokenCount.textContent = 'Tokens: 0';
+                      tokenCounter.textContent = 'Tokens consumed: 0';
                   }
-                  
+
                   async function sendMessage() {
                       if (isStreaming) return;
-                      
                       const text = userInput.value.trim();
                       if (!text) return;
-                      
-                      // Add user message
-                      addMessage('user', text);
+
+                      appendMessage('user', text);
                       userInput.value = '';
                       userInput.style.height = 'auto';
                       sendButton.disabled = true;
                       isStreaming = true;
-                      
-                      // Add placeholder for assistant
-                      const tempDiv = addMessage('assistant', 'Thinking...', true);
-                      
+
+                      appendMessage('assistant', 'Thinking', true);
+
                       try {
                           const temperature = parseFloat(document.getElementById('temperature').value);
                           const maxTokens = parseInt(document.getElementById('maxTokens').value);
-                          const stream = document.getElementById('streamCheck').checked;
-                          
+
                           const response = await fetch('/api/chat', {
                               method: 'POST',
                               headers: { 'Content-Type': 'application/json' },
@@ -568,284 +574,112 @@ jobs:
                                   messages: [{ role: 'user', content: text }],
                                   temperature: temperature,
                                   max_tokens: maxTokens,
-                                  stream: stream
+                                  stream: true
                               })
                           });
-                          
-                          if (!response.ok) {
-                              const error = await response.text();
-                              throw new Error(error || 'Server error');
-                          }
-                          
-                          if (stream) {
-                              // Streaming response
-                              const reader = response.body.getReader();
-                              const decoder = new TextDecoder();
-                              let fullContent = '';
-                              let buffer = '';
-                              
-                              while (true) {
-                                  const { done, value } = await reader.read();
-                                  if (done) break;
-                                  
-                                  buffer += decoder.decode(value, { stream: true });
-                                  const lines = buffer.split('\\n');
-                                  buffer = lines.pop() || '';
-                                  
-                                  for (const line of lines) {
-                                      if (line.startsWith('data: ')) {
-                                          const data = line.slice(6);
-                                          if (data === '[DONE]') continue;
-                                          try {
-                                              const parsed = JSON.parse(data);
-                                              if (parsed.content) {
-                                                  fullContent += parsed.content;
-                                                  updateLastMessage(fullContent, false);
-                                                  totalTokens += parsed.tokens || 1;
-                                                  tokenCount.textContent = `Tokens: ${totalTokens}`;
-                                              }
-                                          } catch (e) {}
-                                      }
+
+                          if (!response.ok) throw new Error('Network response was not ok');
+
+                          const reader = response.body.getReader();
+                          const decoder = new TextDecoder();
+                          let fullContent = '';
+                          let buffer = '';
+
+                          while (true) {
+                              const { done, value } = await reader.read();
+                              if (done) break;
+
+                              buffer += decoder.decode(value, { stream: true });
+                              const lines = buffer.split('\n');
+                              buffer = lines.pop() || '';
+
+                              for (const line of lines) {
+                                  if (line.startsWith('data: ')) {
+                                      const data = line.slice(6);
+                                      if (data === '[DONE]') continue;
+                                      try {
+                                          const parsed = JSON.parse(data);
+                                          if (parsed.content) {
+                                              fullContent += parsed.content;
+                                              updateLastMessage(fullContent, false);
+                                          }
+                                      } catch (e) {}
                                   }
                               }
-                              // Final update
-                              updateLastMessage(fullContent, true);
-                              totalTokens += Math.ceil(fullContent.length / 4);
-                              tokenCount.textContent = `Tokens: ${totalTokens}`;
-                          } else {
-                              // Non-streaming
-                              const data = await response.json();
-                              updateLastMessage(data.content, true);
-                              totalTokens += data.tokens || Math.ceil(data.content.length / 4);
-                              tokenCount.textContent = `Tokens: ${totalTokens}`;
                           }
-                          
+                          updateLastMessage(fullContent, true);
+                          totalTokens += Math.ceil(fullContent.length / 4);
+                          tokenCounter.textContent = `Tokens consumed: ${totalTokens}`;
                       } catch (error) {
-                          console.error('Error:', error);
-                          updateLastMessage('❌ Error: ' + error.message, true);
+                          updateLastMessage('❌ Error processing request.', true);
                       }
-                      
+
                       sendButton.disabled = false;
                       isStreaming = false;
                       userInput.focus();
                   }
-                  
-                  // Check status periodically
-                  async function checkStatus() {
-                      try {
-                          const response = await fetch('/api/status');
-                          const data = await response.json();
-                          if (data.status === 'online') {
-                              statusDot.className = 'status-dot online';
-                              statusText.textContent = 'Ollama Online';
-                          } else {
-                              statusDot.className = 'status-dot offline';
-                              statusText.textContent = 'Ollama Offline';
-                          }
-                      } catch (e) {
-                          statusDot.className = 'status-dot offline';
-                          statusText.textContent = 'Server Offline';
-                      }
-                  }
-                  setInterval(checkStatus, 30000);
-                  checkStatus();
               </script>
           </body>
           </html>
           '''
-          
-          # ================================================================
-          #  FastAPI Endpoints
-          # ================================================================
-          
+
           @app.get("/", response_class=HTMLResponse)
           async def root():
-              """Serve the web UI"""
-              return HTML_TEMPLATE.replace(
-                  "{{ model_name }}", MODEL_NAME
-              ).replace(
-                  "{{ context_size }}", str(CONTEXT_SIZE)
-              )
-          
+              return HTML_TEMPLATE.replace("{{ model_name }}", MODEL_NAME).replace("{{ context_size }}", str(CONTEXT_SIZE))
+
           @app.get("/api/status")
           async def status():
-              """Check if Ollama is running"""
               try:
                   async with httpx.AsyncClient(timeout=3) as client:
                       resp = await client.get(f"{OLLAMA_HOST}/api/tags")
                       if resp.status_code == 200:
-                          return {"status": "online", "models": resp.json()}
+                          return {"status": "online"}
               except:
                   pass
               return {"status": "offline"}
-          
-          @app.get("/api/models")
-          async def list_models():
-              """List downloaded models"""
-              try:
-                  async with httpx.AsyncClient(timeout=5) as client:
-                      resp = await client.get(f"{OLLAMA_HOST}/api/tags")
-                      if resp.status_code == 200:
-                          return resp.json()
-              except:
-                  pass
-              return {"models": []}
-          
+
           @app.post("/api/chat")
           async def chat(request: ChatRequest):
-              """Chat with Ollama"""
               try:
-                  # Convert messages to Ollama format
                   ollama_messages = [{"role": m.role, "content": m.content} for m in request.messages]
-                  
-                  if request.stream:
-                      # Streaming response
-                      async def generate():
-                          try:
-                              async with httpx.AsyncClient(timeout=120) as client:
-                                  async with client.stream(
-                                      "POST",
-                                      f"{OLLAMA_HOST}/api/chat",
-                                      json={
-                                          "model": MODEL_NAME,
-                                          "messages": ollama_messages,
-                                          "stream": True,
-                                          "options": {
-                                              "temperature": request.temperature,
-                                              "num_predict": request.max_tokens,
-                                              "num_ctx": CONTEXT_SIZE
-                                          }
+                  async def generate():
+                      try:
+                          async with httpx.AsyncClient(timeout=120) as client:
+                              async with client.stream(
+                                  "POST",
+                                  f"{OLLAMA_HOST}/api/chat",
+                                  json={
+                                      "model": MODEL_NAME,
+                                      "messages": ollama_messages,
+                                      "stream": True,
+                                      "options": {
+                                          "temperature": request.temperature,
+                                          "num_predict": request.max_tokens,
+                                          "num_ctx": CONTEXT_SIZE
                                       }
-                                  ) as response:
-                                      async for chunk in response.aiter_bytes():
-                                          try:
-                                              data = chunk.decode('utf-8').strip()
-                                              if data:
-                                                  lines = data.split('\\n')
-                                                  for line in lines:
-                                                      if line.strip():
-                                                          try:
-                                                              json_data = json.loads(line)
-                                                              if "message" in json_data and "content" in json_data["message"]:
-                                                                  content = json_data["message"]["content"]
-                                                                  yield f"data: {json.dumps({'content': content})}\\n\\n"
-                                                          except json.JSONDecodeError:
-                                                              continue
-                                          except:
-                                              continue
-                          except Exception as e:
-                              yield f"data: {json.dumps({'error': str(e)})}\\n\\n"
-                          yield "data: [DONE]\\n\\n"
-                      
-                      return StreamingResponse(generate(), media_type="text/event-stream")
-                  else:
-                      # Non-streaming response
-                      async with httpx.AsyncClient(timeout=120) as client:
-                          resp = await client.post(
-                              f"{OLLAMA_HOST}/api/chat",
-                              json={
-                                  "model": MODEL_NAME,
-                                  "messages": ollama_messages,
-                                  "stream": False,
-                                  "options": {
-                                      "temperature": request.temperature,
-                                      "num_predict": request.max_tokens,
-                                      "num_ctx": CONTEXT_SIZE
                                   }
-                              }
-                          )
-                          data = resp.json()
-                          return {
-                              "content": data.get("message", {}).get("content", ""),
-                              "tokens": data.get("eval_count", 0)
-                          }
+                              ) as response:
+                                  async for chunk in response.aiter_bytes():
+                                      try:
+                                          data = chunk.decode('utf-8').strip()
+                                          if data:
+                                              for line in data.split('\n'):
+                                                  if line.strip():
+                                                      json_data = json.loads(line)
+                                                      if "message" in json_data and "content" in json_data["message"]:
+                                                          yield f"data: {json.dumps({'content': json_data['message']['content']})}\n\n"
+                                      except:
+                                          continue
+                      except Exception as e:
+                          yield f"data: {json.dumps({'error': str(e)})}\n\n"
+                      yield "data: [DONE]\n\n"
+
+                  return StreamingResponse(generate(), media_type="text/event-stream")
               except Exception as e:
                   raise HTTPException(status_code=500, detail=str(e))
-          
-          @app.post("/api/generate")
-          async def generate(request: GenerateRequest):
-              """Generate text"""
-              try:
-                  if request.stream:
-                      async def generate():
-                          try:
-                              async with httpx.AsyncClient(timeout=120) as client:
-                                  async with client.stream(
-                                      "POST",
-                                      f"{OLLAMA_HOST}/api/generate",
-                                      json={
-                                          "model": MODEL_NAME,
-                                          "prompt": request.prompt,
-                                          "stream": True,
-                                          "options": {
-                                              "temperature": request.temperature,
-                                              "num_predict": request.max_tokens,
-                                              "num_ctx": CONTEXT_SIZE
-                                          }
-                                      }
-                                  ) as response:
-                                      async for chunk in response.aiter_bytes():
-                                          try:
-                                              data = chunk.decode('utf-8').strip()
-                                              if data:
-                                                  lines = data.split('\\n')
-                                                  for line in lines:
-                                                      if line.strip():
-                                                          try:
-                                                              json_data = json.loads(line)
-                                                              if "response" in json_data:
-                                                                  yield f"data: {json.dumps({'content': json_data['response']})}\\n\\n"
-                                                          except:
-                                                              continue
-                                          except:
-                                              continue
-                          except Exception as e:
-                              yield f"data: {json.dumps({'error': str(e)})}\\n\\n"
-                          yield "data: [DONE]\\n\\n"
-                      return StreamingResponse(generate(), media_type="text/event-stream")
-                  else:
-                      async with httpx.AsyncClient(timeout=120) as client:
-                          resp = await client.post(
-                              f"{OLLAMA_HOST}/api/generate",
-                              json={
-                                  "model": MODEL_NAME,
-                                  "prompt": request.prompt,
-                                  "stream": False,
-                                  "options": {
-                                      "temperature": request.temperature,
-                                      "num_predict": request.max_tokens,
-                                      "num_ctx": CONTEXT_SIZE
-                                  }
-                              }
-                          )
-                          data = resp.json()
-                          return {
-                              "content": data.get("response", ""),
-                              "tokens": data.get("eval_count", 0)
-                              }
-              except Exception as e:
-                  raise HTTPException(status_code=500, detail=str(e))
-          
-          # ================================================================
-          #  Main Entry Point
-          # ================================================================
-          
+
           if __name__ == "__main__":
-              print("🦙 Starting Llama Web UI...")
-              print(f"   Model: {MODEL_NAME}")
-              print(f"   Context: {CONTEXT_SIZE}")
-              print(f"   Port: {PORT}")
-              print(f"   Ollama: {OLLAMA_HOST}")
-              print("")
-              print("🌐 Open http://localhost:" + str(PORT) + " in your browser")
-              print("")
-              
-              uvicorn.run(
-                  app,
-                  host="0.0.0.0",
-                  port=PORT,
-                  log_level="info"
-              )
+              uvicorn.run(app, host="0.0.0.0", port=PORT, log_level="info")
           EOF
           
           echo "✅ Server script created!"
@@ -856,10 +690,8 @@ jobs:
           echo " 🚀  Starting Ollama server"
           echo "──────────────────────────────────────────"
           
-          # Start Ollama in background
           ollama serve &
           
-          # Wait for Ollama to be ready
           echo "⏳ Waiting for Ollama to be ready..."
           for i in {1..30}; do
             if curl -s http://localhost:11434/api/tags > /dev/null 2>&1; then
@@ -868,9 +700,6 @@ jobs:
             fi
             sleep 2
           done
-          
-          echo "📊 Ollama status:"
-          curl -s http://localhost:11434/api/tags | python -m json.tool || echo "⚠️ Status check"
 
       - name: 🔧 Start Web Server
         run: |
@@ -878,15 +707,12 @@ jobs:
           echo " 🌐  Starting Web UI server"
           echo "──────────────────────────────────────────"
           
-          # Set environment variables for the server
           export MODEL_NAME="${{ github.event.inputs.model }}"
           export CONTEXT_SIZE="${{ github.event.inputs.context_size }}"
           export PORT="${{ github.event.inputs.port }}"
           
-          # Start the server in background
           python ollama_server.py &
           
-          # Wait for server to be ready
           echo "⏳ Waiting for web server to start..."
           for i in {1..15}; do
             if curl -s http://localhost:${{ github.event.inputs.port }} > /dev/null 2>&1; then
@@ -939,67 +765,30 @@ jobs:
           echo ""
           echo "╔═══════════════════════════════════════════════════════════════════╗"
           echo "║                                                                   ║"
-          echo "║           🎉  L L A M A   I S   R E A D Y !  🎉                 ║"
+          echo "║            🎉  L L A M A   I S   R E A D Y !  🎉                  ║"
           echo "║                                                                   ║"
           echo "╠═══════════════════════════════════════════════════════════════════╣"
-          echo "║                                                                   ║"
           if [ -n "$TUNNEL_URL" ]; then
             echo "║  🔗  TUNNEL URL:  $TUNNEL_URL"
           else
             echo "║  ⚠️  Check logs above for the tunnel URL"
           fi
-          echo "║                                                                   ║"
-          echo "╠═══════════════════════════════════════════════════════════════════╣"
-          echo "║  🦙  Model: ${{ github.event.inputs.model }}                     ║"
-          echo "║  📝  Context: ${{ github.event.inputs.context_size }} tokens    ║"
-          echo "║  🌐  Status: Online & Ready                                      ║"
-          echo "║                                                                   ║"
-          echo "╠═══════════════════════════════════════════════════════════════════╣"
-          echo "║  📌  HOW TO USE:                                                  ║"
-          echo "║  1. Open the URL above in your browser                           ║"
-          echo "║  2. Type your message in the chat box                            ║"
-          echo "║  3. Click Send or press Enter                                    ║"
-          echo "║  4. Adjust Temperature and Max Tokens in settings                ║"
-          echo "║                                                                   ║"
-          echo "╠═══════════════════════════════════════════════════════════════════╣"
-          echo "║  ⏱️  Tunnel expires in ~6 hours (GitHub Action limit)            ║"
-          echo "║  🧠  Memory usage: ~1-2GB RAM for 1B model                      ║"
-          echo "║                                                                   ║"
           echo "╚═══════════════════════════════════════════════════════════════════╝"
-          echo ""
           
           wait $TUNNEL_PID
 
       - name: Display Final URL
         if: always() && env.TUNNEL_URL != ''
         run: |
-          echo ""
           echo "═══════════════════════════════════════════════════════════════════"
-          echo "  🔗  ACCESS YOUR LLAMA WEB UI:"
+          echo "  🔗  ACCESS YOUR CHATGPT LLAMA UI:"
           echo "  📌  ${{ env.TUNNEL_URL }}"
           echo "═══════════════════════════════════════════════════════════════════"
-          echo ""
-          echo "  🦙  Model: ${{ github.event.inputs.model }}"
-          echo "  📝  Context: ${{ github.event.inputs.context_size }} tokens"
-          echo "  ⏱️  Available for: ~6 hours"
-          echo ""
-
-      - name: Show error if tunnel failed
-        if: failure() || env.TUNNEL_URL == ''
-        run: |
-          echo ""
-          echo "═══════════════════════════════════════════════════════════════════"
-          echo "  ⚠️  TUNNEL CREATION FAILED - CHECK LOGS"
-          echo "═══════════════════════════════════════════════════════════════════"
-          echo ""
-          echo "  🔍 Look for 'trycloudflare.com' in the logs above"
-          echo "  📝 The URL format is: https://[random-words].trycloudflare.com"
 
       - name: 🧹 Cleanup
         if: always()
         run: |
           echo "🧹 Cleaning up..."
-          docker stop $(docker ps -aq) 2>/dev/null || true
           pkill -f "cloudflared" 2>/dev/null || true
           pkill -f "python ollama_server" 2>/dev/null || true
           echo "✅ Cleanup complete"
